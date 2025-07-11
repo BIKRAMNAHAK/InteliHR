@@ -129,7 +129,7 @@ export const logoutUser = (navigation) => {
     navigation.replace('Login');
   };
 };
-
+ 
 
 export const ATTENDANCE_SUCCESS = "ATTENDANCE_SUCCESS";
 export const ATTENDANCE_ERROR = "ATTENDANCE_ERROR";
@@ -198,6 +198,8 @@ export const attendanceDataAsunc = (formData) => {
 };
 
 export const getInfoAsync = (info) => {
+  // console.log("inof", info);
+  
   return async (dispatch) => {
     try {
       const res = await axios.get(`${BASE_URL}/att_record.php?empid=${info.empid}&time=${info.date}`)

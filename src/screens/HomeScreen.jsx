@@ -30,7 +30,7 @@ const HomeScreen = ({ navigation }) => {
     const [location, setLocation] = useState(null);
     const [isPunchedIn, setIsPunchedIn] = useState({
         status: '', active: '', message: '',
-        time: "--:--:--", selfi: '', outtime: "--:--:--"
+        time: "--:--:--", selfi: '', outtime: "--:--:--", active: ''
     });
     const [punchInTime, setPunchInTime] = useState(null);
     const [punchOutTime, setPunchOutTime] = useState(null);
@@ -108,10 +108,8 @@ const HomeScreen = ({ navigation }) => {
             setIsPunchedIn({
                 status: attResponse.status,
                 message: attResponse.message,
-                time: attResponse?.intime || "--:--:--",
                 active: attResponse.active,
                 selfi: attResponse.selfi,
-                outtime: attResponse?.outtime || "--:--:--"
             });
         }
     }, [attResponse]);
@@ -138,22 +136,6 @@ const HomeScreen = ({ navigation }) => {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
     };
-
-    // const collectPunchData = async (isIn) => {
-    //     const now = new Date();
-    //     if (isIn) setPunchInTime(now); else setPunchOutTime(now);
-    //     if (!(await requestCameraPermission())) return null;
-
-    //     const resp = await new Promise(resolve =>
-    //         launchCamera({ mediaType: 'photo', cameraType: 'front', cameraOrientation: 'front' }, resolve)
-    //     );
-    //     if (resp.didCancel || !resp.assets?.length) return null;
-
-    //     const image = resp.assets[0];
-    //     setCapturedImage(image);
-    //     setShowPunchCard(true);
-    //     return { image, loc: location, now };
-    // };
 
     const collectPunchData = async (isIn) => {
         const now = new Date();
@@ -211,6 +193,18 @@ const HomeScreen = ({ navigation }) => {
         if (!punchData) return;
     };
 
+    const resetPunchStatus = () => {
+        setIsPunchedIn({
+            status: '',
+            active: '',
+            message: '',
+            time: '--:--:--',
+            selfi: '',
+            outtime: '--:--:--'
+        });
+    };
+
+
     const handleAttandance = async () => {
         setLoading(true);
         // ✅ Use location from state (fallback)
@@ -234,6 +228,7 @@ const HomeScreen = ({ navigation }) => {
                 return showCustomAlert('Location Error', 'Unable to fetch location. Please ensure GPS is ON and location permission is granted.', false);
             }
         }
+
         // ✅ Check if selfie exists
         if (!capturedImage?.uri) {
             setLoading(false);
@@ -273,6 +268,30 @@ const HomeScreen = ({ navigation }) => {
                     res.message || 'Something went wrong',
                     res.status === '200' || res.status === '201'
                 );
+
+                const now = new Date();
+                const date = now.toLocaleDateString('en-CA');
+                const empid = employees.empid;
+                dispatch(getInfoAsync({ empid, date }))
+                    .then((res) => {
+                        if (res?.status === "200" && res?.Data?.length > 0) {
+                            const lastData = res.Data[res.Data.length - 1];
+                            setIsPunchedIn({
+                                status: lastData.att_status || '',
+                                active: lastData.active || '',
+                                message: '',
+                                time: lastData.intime || '--:--:--',
+                                selfi: lastData.selfie || '',
+                                outtime: lastData.outtime || '--:--:--'
+                            });
+                        } else {
+                            resetPunchStatus();
+                        }
+                    }).catch((err) => {
+                        setLoading(false);
+                        console.error("Error fetching data:", err);
+                        resetPunchStatus(); // 👈 Fallback on error
+                    });
             })
             .catch((err) => {
                 setLoading(false);
@@ -298,18 +317,44 @@ const HomeScreen = ({ navigation }) => {
             empid: info.empid,
             date: info.date
         });
-        // dispatch(getInfoAsync(info)).then((res) => {
-        //     setLoading(false);
-        //     if (res.status === "200" && res.Data) {
-        //         navigation.navigate('Attendance_rec', { attendanceData: res.Data });
-        //     } else {
-        //         showCustomAlert("Info", "No Records Found", false);
-        //     }
-        // }).catch((err) => {
-        //     setLoading(false);
-        //     showCustomAlert("Failed", err.message || "Something went wrong", false);
-        // });
     };
+
+    useEffect(() => {
+        if (!employees.empid) return;
+        setLoading(true);
+
+        const today = new Date();
+        const date = today.toLocaleDateString('en-CA');
+        const empid = employees.empid;
+        const getData = { date, empid };
+
+        dispatch(getInfoAsync(getData))
+            .then((res) => {
+                setLoading(false);
+
+                if (res?.status === "200" && res?.Data?.length > 0) {
+                    const lastData = res.Data[res.Data.length - 1];
+                    setIsPunchedIn({
+                        status: lastData.att_status || '',
+                        active: lastData.active || '',
+                        message: '',
+                        time: lastData.intime || '--:--:--',
+                        selfi: lastData.selfie || '',
+                        outtime: lastData.outtime || '--:--:--'
+                    });
+                } else {
+                    resetPunchStatus(); // 👈 If no data
+                }
+            })
+            .catch((err) => {
+                setLoading(false);
+                console.error("Error fetching data:", err);
+                resetPunchStatus(); // 👈 Fallback on error
+            });
+
+    }, [employees, isFocused]); // 👈 Include `isFocused` to recheck on screen focus
+
+
 
     // ================================
     // Render JSX UI
@@ -331,7 +376,7 @@ const HomeScreen = ({ navigation }) => {
 
                 {/* ⏱ Check In/Out Button */}
                 <View style={{ padding: 16, backgroundColor: '#fff', flexDirection: 'row' }}>
-                    {isPunchedIn.active != 1 ? (
+                    {isPunchedIn.active != 1 && isPunchedIn ? (
                         employees.mobatt == '1' ? (
                             <TouchableOpacity style={{ width: 100, height: 50, borderColor: '#E53935', borderRadius: 75, justifyContent: 'center', alignItems: 'center', alignSelf: 'center', padding: 10 }} onPress={() => setShowPunchCard(true)}>
                                 <MaterialIcons name="fingerprint" size={30} color="green" />
@@ -354,16 +399,16 @@ const HomeScreen = ({ navigation }) => {
                 </View>
 
                 {/* ℹ️ Info & Timing */}
-                <View style={{flexDirection: "row", backgroundColor: "white", justifyContent: "space-between", paddingLeft: 10, width : "100%"}}>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start' , width : "45%"}}>
+                <View style={{ flexDirection: "row", backgroundColor: "white", justifyContent: "space-between", paddingLeft: 10, width: "100%" }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', width: "45%" }}>
                         <Ionicons name="ellipse-outline" size={10} style={{ backgroundColor: "green", borderRadius: 40, color: "green", marginTop: 6, marginRight: 5 }} />
                         <Text style={{ fontSize: 16, color: '#333' }}>In : {isPunchedIn.time || "--:--:--"}</Text>
                     </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', width : "45%" }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', width: "45%" }}>
                         <Ionicons name="ellipse-outline" size={10} style={{ backgroundColor: "#E53935", borderRadius: 40, color: "#E53935", marginTop: 6, marginRight: 5 }} />
                         <Text style={{ fontSize: 16, color: '#E53935' }}>out : {isPunchedIn.outtime || "--:--:--"}</Text>
                     </View>
-                    <View style={{ width : "10%"}}>
+                    <View style={{ width: "10%" }}>
                         <Ionicons name="information-circle-outline" size={24} color="#E53935" onPress={() => handleInfo(employees.empid)} />
                     </View>
                 </View>
@@ -395,11 +440,6 @@ const HomeScreen = ({ navigation }) => {
                                             <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 }}>{!capturedImage?.uri ? ("📷 Take Selfie") : ("📷 Take Again")}</Text>
                                         </TouchableOpacity>
                                     </View>
-{/* 
-                                    <View style={{ flex: 1, borderBottomWidth: 1, borderBottomColor: '#ddd', marginLeft: 15 }}>
-                                        <Text style={{ fontSize: 16, fontWeight: 'bold' }}>NAME : - {employees.empname ?? 'Loading...'}</Text>
-                                        <Text style={{ fontSize: 14, color: 'gray' }}>EMP-ID: - {employees.empcode ?? '---'}</Text>
-                                    </View> */}
 
                                     {location && (
                                         <Text style={{ color: '#E53935', fontSize: 14, marginBottom: 5, borderBottomWidth: 1, borderBottomColor: '#ddd', width: '100%', paddingBottom: 8, textAlign: 'center' }}>
@@ -581,11 +621,6 @@ const styles = StyleSheet.create({
 
     disabledCircle: { backgroundColor: '#EFEFEF' }, // Disabled circle background
     disabledText: { color: '#AAAAAA' }, // Disabled text color
-
-    // timeRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 10 }, // Time row (optional)
-    // timeBox: { alignItems: 'center' }, // Time box (optional)
-    // timeLabel: { fontWeight: 'bold', fontSize: 14 }, // Label (optional)
-    // timeSubLabel: { fontSize: 12, color: 'gray' }, // Sub-label (optional)
 
     section: { backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 15, borderRadius: 8, marginTop: 10, width: '100%' }, // Generic section container
     sectionTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 5 }, // Section heading
