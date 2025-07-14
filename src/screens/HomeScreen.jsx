@@ -5,7 +5,6 @@ import {
     TouchableWithoutFeedback, KeyboardAvoidingView, Keyboard
 } from 'react-native';
 
-import ImageResizer from 'react-native-image-resizer';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import AwesomeAlert from 'react-native-awesome-alerts';
@@ -35,10 +34,8 @@ const HomeScreen = ({ navigation }) => {
     const [punchInTime, setPunchInTime] = useState(null);
     const [punchOutTime, setPunchOutTime] = useState(null);
     const [totalHours, setTotalHours] = useState('--:--:--');
-
-
     const [currentTime, setCurrentTime] = useState('');
-
+    const [birthdays, setBirthdays] = useState([]);
     const [showAlert, setShowAlert] = useState(false);
     const [alertTitle, setAlertTitle] = useState('');
     const [alertMessage, setAlertMessage] = useState('');
@@ -145,10 +142,16 @@ const HomeScreen = ({ navigation }) => {
         // 1️⃣ Ask for camera permission
         if (!(await requestCameraPermission())) return null;
 
-        // 2️⃣ Launch camera
+        // 2️⃣ Launch camera with reduced quality
         const resp = await new Promise(resolve =>
             launchCamera(
-                { mediaType: 'photo', cameraType: 'front', cameraOrientation: 'front' },
+                {
+                    mediaType: 'photo',
+                    cameraType: 'front',
+                    quality: 0.5,  // reduce size without resizer
+                    saveToPhotos: false,
+                    includeBase64: false,
+                },
                 resolve
             )
         );
@@ -158,34 +161,18 @@ const HomeScreen = ({ navigation }) => {
 
         const image = resp.assets[0];
 
-        try {
-            // 4️⃣ Resize the image
-            const resizedImage = await ImageResizer.createResizedImage(
-                image.uri,       // original image path
-                600,             // max width
-                600,             // max height
-                'JPEG',          // format
-                50               // quality %
-            );
+        // 4️⃣ Directly use original image (no resizing)
+        const imageData = {
+            uri: image.uri,
+            name: image.fileName || 'photo.jpg',
+            type: image.type || 'image/jpeg'
+        };
 
-            const resized = {
-                uri: resizedImage.uri,
-                name: image.fileName || 'photo.jpg',
-                type: image.type || 'image/jpeg'
-            };
-
-            // 5️⃣ Set resized image and return
-            setCapturedImage(resized);
-            setShowPunchCard(true);
-            return { image: resized, loc: location, now };
-
-        } catch (resizeErr) {
-            console.warn("Image resize failed:", resizeErr);
-            setCapturedImage(image); // fallback to original
-            setShowPunchCard(true);
-            return { image, loc: location, now };
-        }
+        setCapturedImage(imageData);
+        setShowPunchCard(true);
+        return { image: imageData, loc: location, now };
     };
+
 
     const handlePunch = async () => {
         const isIn = !isPunchedIn.active;
@@ -319,6 +306,19 @@ const HomeScreen = ({ navigation }) => {
         });
     };
 
+    const getCurrentMonthBirthdays = (data) => {
+        const today = new Date();
+        const currentMonth = today.getMonth() + 1;
+
+        return data.filter(emp => {
+            const [year, month, day] = emp.dob.split('-').map(Number);
+            return (
+                month === currentMonth
+            );
+        });
+    };
+
+
     useEffect(() => {
         if (!employees.empid) return;
         setLoading(true);
@@ -331,6 +331,7 @@ const HomeScreen = ({ navigation }) => {
         dispatch(getInfoAsync(getData))
             .then((res) => {
                 setLoading(false);
+                console.log("response : -", res.emp);
 
                 if (res?.status === "200" && res?.Data?.length > 0) {
                     const lastData = res.Data[res.Data.length - 1];
@@ -343,18 +344,23 @@ const HomeScreen = ({ navigation }) => {
                         outtime: lastData.outtime || '--:--:--'
                     });
                 } else {
-                    resetPunchStatus(); // 👈 If no data
+                    resetPunchStatus();
                 }
+
+                // 🎯 Filter Birthdays
+                const birthdayData = getCurrentMonthBirthdays(res.emp || []);
+                console.log("month", birthdayData);
+                setBirthdays(birthdayData); // ← Set to state
+
             })
             .catch((err) => {
                 setLoading(false);
                 console.error("Error fetching data:", err);
-                resetPunchStatus(); // 👈 Fallback on error
+                resetPunchStatus();
             });
 
-    }, [employees, isFocused]); // 👈 Include `isFocused` to recheck on screen focus
-
-
+    }, [employees, isFocused]);
+    // 👈 Include `isFocused` to recheck on screen focus
 
     // ================================
     // Render JSX UI
@@ -363,6 +369,7 @@ const HomeScreen = ({ navigation }) => {
     return (
         <SafeAreaView style={styles.container}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', flexWrap: 'wrap', elevation: 16, paddingHorizontal: 10 }}>
+
                 {/* 👤 Profile & Employee Info */}
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <TouchableOpacity onPress={handleProfile}>
@@ -481,26 +488,35 @@ const HomeScreen = ({ navigation }) => {
                     {/* Wish them section */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Wish them</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                            {[
-                                { name: 'Parvinder ', date: '20 Jul', initials: 'PA' },
-                                { name: 'Suman', date: '21 Jul', initials: 'SU' },
-                                { name: 'Ajay', date: '22 Jul', initials: 'AJ' },
-                                { name: 'Kriti', date: '23 Jul', initials: 'KR' },
-                                { name: 'Dev', date: '24 Jul', initials: 'DE' }
-                            ].map((person, index) => (
-                                <View key={index} style={{ alignItems: 'center', marginRight: 15, }}>
-                                    <View style={styles.birthdayIcon}>
-                                        <Text style={{ color: '#fff' }}>{person.initials}</Text>
-                                    </View>
-                                    <View>
-                                        <Text style={styles.bdayName}>{person.name}</Text>
-                                        <Text style={styles.bdayDate}>{person.date}</Text>
-                                    </View>
-                                </View>
-                            ))}
-                        </ScrollView>
+
+                        {birthdays.length === 0 ? (
+                            <View style={{ paddingVertical: 10 }}>
+                                <Text style={{ fontSize: 14, color: 'gray' }}>No birthdays this month.</Text>
+                            </View>
+                        ) : (
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                {birthdays.map((person, index) => {
+                                    const name = person.empname;
+                                    const [year, month, day] = person.dob.split("-");
+                                    const initials = name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase();
+                                    const displayDate = `${day} ${new Date(person.dob).toLocaleString('default', { month: 'short' })}`;
+
+                                    return (
+                                        <View key={index} style={{ alignItems: 'center', marginRight: 15 }}>
+                                            <View style={styles.birthdayIcon}>
+                                                <Text style={{ color: '#fff' }}>{initials}</Text>
+                                            </View>
+                                            <View>
+                                                <Text style={styles.bdayName}>{name}</Text>
+                                                <Text style={styles.bdayDate}>{displayDate}</Text>
+                                            </View>
+                                        </View>
+                                    );
+                                })}
+                            </ScrollView>
+                        )}
                     </View>
+
 
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Announcements</Text>
@@ -623,7 +639,7 @@ const styles = StyleSheet.create({
     disabledText: { color: '#AAAAAA' }, // Disabled text color
 
     section: { backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 15, borderRadius: 8, marginTop: 10, width: '100%' }, // Generic section container
-    sectionTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 5 }, // Section heading
+    sectionTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 20 , borderBottomColor : '#E53935' , borderBottomWidth : 1 }, // Section heading
     sectionSub: { fontSize: 12, color: '#777', textAlign: 'center' }, // Section subtext
 
     birthdayRow: { flexDirection: 'column', alignItems: 'flex-start' }, // Birthday list vertical

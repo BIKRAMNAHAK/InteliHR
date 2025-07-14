@@ -32,7 +32,7 @@ const AttendanceTimelineCard = ({ record }) => {
   }[att_type?.toLowerCase()] || '#333';
 
   const iconMap = {
-    mobile: 'cellphone', Web: 'web', Biometric: 'fingerprint'
+    Mobile: 'cellphone', Web: 'web', Biometric: 'fingerprint'
   };
 
   return (

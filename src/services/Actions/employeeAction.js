@@ -146,12 +146,6 @@ export const attendanceDataAsunc = (formData) => {
       console.log("URL : ", `${BASE_URL}/emp_attendance.php`);
 
       const r = res.data;
-      console.log("Server Response:", r);
-      console.log("Server Response status:", r.status);
-      console.log("Server Response message:", r.message);
-      console.log("Server Response active:", r.active);
-      console.log("Server Response intime:", r.intime);
-
       let msg = "";
       if (r.status === "200") {
         if (r.message) {
@@ -198,19 +192,12 @@ export const attendanceDataAsunc = (formData) => {
 };
 
 export const getInfoAsync = (info) => {
-  // console.log("inof", info);
-  
+
   return async (dispatch) => {
     try {
       const res = await axios.get(`${BASE_URL}/att_record.php?empid=${info.empid}&time=${info.date}`)
       const responce = res.data
       console.log("responce", responce);
-
-      // if (responce.status == '200') {
-      //   dispatch({type : "GET_ATT_INFO" , payload : responce})
-      // }else{
-      //   dispatch({type : "GET_FAILED_ATT_INFO" , payload : responce.status})
-      // }
       return responce;
     } catch (error) {
       console.log("responce", error);

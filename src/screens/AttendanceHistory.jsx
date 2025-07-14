@@ -216,7 +216,6 @@ const AttendanceHistory = ({ navigation }) => {
     }
   };
 
-
   const handleLeave = () => {
     navigation.navigate('Leave');
   };
@@ -224,7 +223,7 @@ const AttendanceHistory = ({ navigation }) => {
   return (
     <>
       <View style={styles.headerTitle}>
-        <Text style={styles.title}>My Attendance </Text>
+        <Text style={styles.title}>{activeTab === 'My Attendance' ? 'My Attendance  Rec' : `Sub-Ordinate's Rec`} </Text>
       </View>
       <SafeAreaView style={styles.container}>
         {!showCalendar && (
@@ -270,7 +269,8 @@ const AttendanceHistory = ({ navigation }) => {
                 dayTextColor: '#333',
                 monthTextColor: '#E53935',
                 arrowColor: '#E53935',
-                todayTextColor: '#E53935'
+                todayTextColor: '#E53935',
+                textSectionTitleColor: 'black',
               }}
               style={styles.calendar}
             />
@@ -404,6 +404,18 @@ const AttendanceHistory = ({ navigation }) => {
             </TouchableOpacity>
           )
         }
+
+        {activeTab === 'Sub-ordinate' && showCalendar && (
+          <TouchableOpacity
+            style={styles.toggleFloating}
+            onPress={() => {
+              setShowCalendar(false);     
+              setActiveSub(null);         
+            }}
+          >
+            <Ionicons name="list-outline" size={24} color="#fff" />
+          </TouchableOpacity>
+        )}
       </SafeAreaView>
     </>
   );
@@ -412,7 +424,7 @@ const AttendanceHistory = ({ navigation }) => {
 export default AttendanceHistory;
 
 const styles = StyleSheet.create({
-  headerTitle: { alignItems: 'start', paddingHorizontal:10 , backgroundColor : "#fff"},
+  headerTitle: { alignItems: 'start', paddingHorizontal: 10, backgroundColor: "#fff" },
   title: { fontSize: 22, fontWeight: '700', color: '#000' },
   recordContainer: {
     paddingVertical: 8
