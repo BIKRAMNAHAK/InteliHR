@@ -7,7 +7,7 @@ import { Calendar } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useDispatch, useSelector } from 'react-redux';
-import { getAttHistoryAsync } from '../services/Actions/employeeAction';
+import { getAttHistoryAsync, getInfoAsync } from '../services/Actions/employeeAction';
 import { useLoading } from '../navigation/LoadingContext';
 
 const { width } = Dimensions.get('window');
@@ -23,7 +23,9 @@ const AttendanceHistory = ({ navigation }) => {
   const [activeSub, setActiveSub] = useState(null);
   const [expandedSub, setExpandedSub] = useState(null);
   const [attendance, setAttendance] = useState([]);
+  const [singleDayAtt, setSingleDayAtt] = useState([])
 
+  
   const subAttendance = [
     {
       name: 'John Doe',
@@ -126,6 +128,7 @@ const AttendanceHistory = ({ navigation }) => {
   useEffect(() => {
     if (employee) {
       setLoading(true)
+
       dispatch(getAttHistoryAsync(employee.empid))
         .then((res) => {
           console.log("return res", res);
@@ -220,6 +223,26 @@ const AttendanceHistory = ({ navigation }) => {
     navigation.navigate('Leave');
   };
 
+  const handleFetchSingleRecAtt = async (date, empid) => {
+    try {
+      setLoading(true);
+      const response = await dispatch(getInfoAsync({ date, empid }));
+      console.log("Single day data:", response);
+      setSingleDayAtt(response.Data || [])
+      setLoading(false);
+
+      const index = attendance.findIndex(item => item.date === date);
+      if (index !== -1) {
+        setExpandedSub(index);
+      }
+    } catch (err) {
+      setLoading(false);
+      console.error("Failed to fetch single record:", err);
+    }
+  };
+
+  console.log("single rec: ", singleDayAtt);
+
   return (
     <>
       <View style={styles.headerTitle}>
@@ -286,15 +309,15 @@ const AttendanceHistory = ({ navigation }) => {
                   {selectedRecord.map((rec, index) => (
                     <View key={index} style={styles.recordContainer}>
                       <View style={styles.row}>
-                        <Text style={styles.label}>Punch In:</Text>
+                        <Text style={styles.label}>Check In:</Text>
                         <Text style={styles.value}>{rec.punchIn || '00:00'}</Text>
                       </View>
                       <View style={styles.row}>
-                        <Text style={styles.label}>Punch Out:</Text>
+                        <Text style={styles.label}>Check Out:</Text>
                         <Text style={styles.value}>{rec.punchOut || '00:00'}</Text>
                       </View>
                       <View style={styles.row}>
-                        <Text style={styles.label}>Total:</Text>
+                        <Text style={styles.label}>Total Hour:</Text>
                         <Text style={styles.value}>{rec.total || '00:00'}</Text>
                       </View>
                       <View style={styles.row}>
@@ -327,16 +350,62 @@ const AttendanceHistory = ({ navigation }) => {
           <ScrollView contentContainerStyle={styles.scroll}>
             {activeTab === 'My Attendance' ? (
               attendance.map((it, i) => (
-                <View key={i} style={styles.recordRow}>
-                  <View style={[styles.dateBox, { backgroundColor: it.color }]}>
-                    <Text style={styles.dateText}>{it.date.slice(-2)}</Text>
-                    <Text style={styles.dayText}>{it.day}</Text>
-                  </View>
-                  <View style={styles.recordDetails}>
-                    <Text style={styles.value}>Check In: {it.punchIn || '00:00'}</Text>
-                    <Text style={styles.value}>Check Out: {it.punchOut || '00:00'}</Text>
-                    <Text style={styles.value}>Total Hour: {it.total || '00:00'}</Text>
-                  </View>
+                <View key={i}>
+                  <TouchableOpacity
+                    style={styles.subRecordRow}
+                    onPress={() =>
+                      expandedSub === i
+                        ? setExpandedSub(null)
+                        : handleFetchSingleRecAtt(it.date, employee.empid)
+                    }
+                  >
+                    <View style={[styles.dateBox, { backgroundColor: it.color }]}>
+                      <Text style={styles.dateText}>{it.date.slice(-2)}</Text>
+                      <Text style={styles.dayText}>{it.day}</Text>
+                    </View>
+                    <View style={styles.subDetails}>
+                      <Text style={styles.value}>In: {it.punchIn || '00:00'}</Text>
+                      <Text style={styles.value}>Out: {it.punchOut || '00:00'}</Text>
+                      <Text style={styles.value}>Total: {it.total || '00:00'}</Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {expandedSub === i && (
+                    <ScrollView style={styles.accordionDetail} nestedScrollEnabled={true}>
+                      <View style={styles.AttcardHeader}>
+                        <Text style={styles.detailTitle}>Attendance Details</Text>
+                        <Text style={styles.detailValue}>{it.date}</Text>
+                      </View>
+                      {singleDayAtt.map((att, idx) => (
+                        <ScrollView showsVerticalScrollIndicator style={{ maxHeight: 100 , backgroundColor : "#fcfcf"}}>
+                          <View key={idx} style={{elevation : 16, marginBottom  : 10}}>
+                            <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Check In:</Text>
+                              <Text style={styles.detailValue}>{att.intime || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Check Out:</Text>
+                              <Text style={styles.detailValue}>{att.outtime || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.detailRow}>
+                              <Text style={styles.detailLabel}>Total Hour:</Text>
+                              <Text style={styles.detailValue}>{att.total_time || '00:00 hr'}</Text>
+                            </View>
+                          </View>
+                        </ScrollView>
+                      ))}
+                      <View style={styles.cardFooter}>
+                        <TouchableOpacity style={[styles.footerBtn, styles.btnLeave]} onPress={handleLeave}>
+                          <Text style={styles.btnText}>Apply Leave</Text>
+                        </TouchableOpacity>
+                        {(singleDayAtt.punchIn || singleDayAtt.punchOut) && (
+                          <TouchableOpacity style={[styles.footerBtn, styles.btnReg]}>
+                            <Text style={styles.btnText}>Regularisation</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </ScrollView>
+                  )}
                 </View>
               ))
             ) : (
@@ -367,8 +436,8 @@ const AttendanceHistory = ({ navigation }) => {
                   </TouchableOpacity>
                   {expandedSub === i && (
                     <View style={styles.accordionDetail}>
-                      <Text style={styles.detailTitle}>Attendance Details</Text>
                       <View style={styles.detailRow}>
+                        <Text style={styles.detailTitle}>Attendance Details</Text>
                         <Text style={styles.detailLabel}>Date:</Text>
                         <Text style={styles.detailValue}>{it.date}</Text>
                       </View>
@@ -409,8 +478,8 @@ const AttendanceHistory = ({ navigation }) => {
           <TouchableOpacity
             style={styles.toggleFloating}
             onPress={() => {
-              setShowCalendar(false);     
-              setActiveSub(null);         
+              setShowCalendar(false);
+              setActiveSub(null);
             }}
           >
             <Ionicons name="list-outline" size={24} color="#fff" />
@@ -454,8 +523,9 @@ const styles = StyleSheet.create({
   nameText: { fontSize: 14, fontWeight: 'bold', marginBottom: 4 },
   subButtons: { flexDirection: 'row' },
   iconBtn: { marginLeft: 8, padding: 4 },
+  AttcardHeader:{borderBottomWidth : 2 ,borderBottomColor : '#E53935' ,flexDirection : "row" , justifyContent : "space-between" , marginBottom : 20},
   accordionDetail: { backgroundColor: '#fff', padding: 16, borderRadius: 10, marginHorizontal: 8, marginBottom: 10, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-  detailTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: '#E53935', textAlign: 'center', borderBottomWidth: 2, borderBottomColor: "#E53935", paddingBottom: 4 },
+  detailTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, paddingBottom: 4 },
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   detailLabel: { fontSize: 14, color: '#555', fontWeight: '600' },
   detailValue: { fontSize: 14, color: '#222', fontWeight: '600' },

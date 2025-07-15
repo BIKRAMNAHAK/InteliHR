@@ -1,8 +1,8 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { persistor } from '../../store';
-// const BASE_URL = 'http://10.0.2.2:80/HRMS/controller';
-const BASE_URL = 'https://chaaruvi.com/hrms/Mobileapp/'
+const BASE_URL = 'http://10.0.2.2:80/HRMS/controller';
+// const BASE_URL = 'https://chaaruvi.com/hrms/Mobileapp/'
 
 export const LoginUserAsync = (input) => {
   console.log("action", input);

@@ -48,46 +48,6 @@ const HomeScreen = ({ navigation }) => {
         setShowAlert(true);
     };
 
-    useEffect(() => {
-        let watchId = null;
-        setLoading(true);
-        const startLocationTracking = async () => {
-            const granted = await PermissionsAndroid.request(
-                PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-                {
-                    title: 'Location Permission',
-                    message: 'App needs access to your location.',
-                    buttonNeutral: 'Ask Me Later',
-                    buttonNegative: 'Cancel',
-                    buttonPositive: 'OK',
-                }
-            );
-
-            if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-                Geolocation.getCurrentPosition(
-                    (position) => {
-                        setLocation(position.coords);
-                        setLoading(false); // ✅ stop loader here
-                    },
-                    (error) => {
-                        console.warn('Location error:', error);
-                        setLoading(false); // stop even on error
-                    },
-                    { enableHighAccuracy: false, timeout: 10000, maximumAge: 1000 }
-                );
-            } else {
-                setLoading(false);
-            }
-        };
-
-        startLocationTracking();
-
-        return () => {
-            if (watchId !== null) Geolocation.clearWatch(watchId);
-        };
-    }, [isFocused]);
-
-
     useEffect(() => { if (employee) setEmployees(employee); }, [employee]);
 
     useEffect(() => {
@@ -295,14 +255,17 @@ const HomeScreen = ({ navigation }) => {
     const handleInfo = (empid) => {
         const time = new Date();
         const date = time.toLocaleDateString('en-CA')
+        const empname = employees.empname
         const info = {
             empid,
-            date
+            date,
+            empname
         };
 
         navigation.navigate('Attendance_rec', {
             empid: info.empid,
-            date: info.date
+            date: info.date,
+            empname : info.empname
         });
     };
 
@@ -318,20 +281,57 @@ const HomeScreen = ({ navigation }) => {
         });
     };
 
-
     useEffect(() => {
         if (!employees.empid) return;
-        setLoading(true);
 
-        const today = new Date();
-        const date = today.toLocaleDateString('en-CA');
-        const empid = employees.empid;
-        const getData = { date, empid };
+        let watchId = null;
 
-        dispatch(getInfoAsync(getData))
-            .then((res) => {
+        const fetchData = async () => {
+            setLoading(true);
+
+            // 🎯 1. Start Live Location Tracking
+            try {
+                const granted = await PermissionsAndroid.request(
+                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+                    {
+                        title: 'Location Permission',
+                        message: 'App needs access to your location.',
+                        buttonNeutral: 'Ask Me Later',
+                        buttonNegative: 'Cancel',
+                        buttonPositive: 'OK',
+                    }
+                );
+
+                if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+                    watchId = Geolocation.watchPosition(
+                        (position) => {
+                            setLocation(position.coords); // 🔁 updates live
+                            console.log("📍 Live location:", position.coords);
+                        },
+                        (error) => {
+                            console.warn("📡 Location tracking error:", error.message);
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            distanceFilter: 5, // update after 5 meters movement
+                            interval: 5000,     // Android only
+                            fastestInterval: 2000,
+                        }
+                    );
+                }
+            } catch (error) {
+                console.warn("Permission or Location error:", error);
+            }
+
+            // 🎯 2. Attendance info
+            const today = new Date();
+            const date = today.toLocaleDateString('en-CA');
+            const empid = employees.empid;
+            const getData = { date, empid };
+
+            try {
+                const res = await dispatch(getInfoAsync(getData));
                 setLoading(false);
-                console.log("response : -", res.emp);
 
                 if (res?.status === "200" && res?.Data?.length > 0) {
                     const lastData = res.Data[res.Data.length - 1];
@@ -347,20 +347,25 @@ const HomeScreen = ({ navigation }) => {
                     resetPunchStatus();
                 }
 
-                // 🎯 Filter Birthdays
                 const birthdayData = getCurrentMonthBirthdays(res.emp || []);
-                console.log("month", birthdayData);
-                setBirthdays(birthdayData); // ← Set to state
-
-            })
-            .catch((err) => {
+                setBirthdays(birthdayData);
+            } catch (err) {
                 setLoading(false);
                 console.error("Error fetching data:", err);
                 resetPunchStatus();
-            });
+            }
+        };
 
+        fetchData();
+
+        return () => {
+            if (watchId !== null) {
+                Geolocation.clearWatch(watchId);
+                console.log("🛑 Location watch stopped");
+            }
+        };
     }, [employees, isFocused]);
-    // 👈 Include `isFocused` to recheck on screen focus
+
 
     // ================================
     // Render JSX UI
@@ -368,10 +373,10 @@ const HomeScreen = ({ navigation }) => {
 
     return (
         <SafeAreaView style={styles.container}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', flexWrap: 'wrap', elevation: 16, paddingHorizontal: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', flexWrap: 'wrap', elevation: 16, paddingHorizontal: 10 , rowGap : 10}}>
 
                 {/* 👤 Profile & Employee Info */}
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' , width:'60%'}}>
                     <TouchableOpacity onPress={handleProfile}>
                         <Image source={{ uri: 'https://images.unsplash.com/photo-1595152772835-219674b2a8a6?crop=faces&fit=crop&w=300&h=300' }} style={{ width: 40, height: 40, borderRadius: 20 }} />
                     </TouchableOpacity>
@@ -382,10 +387,10 @@ const HomeScreen = ({ navigation }) => {
                 </View>
 
                 {/* ⏱ Check In/Out Button */}
-                <View style={{ padding: 16, backgroundColor: '#fff', flexDirection: 'row' }}>
+                <View style={{ padding: 16, backgroundColor: '#fff', flexDirection: 'row', width : "40%" }}>
                     {isPunchedIn.active != 1 && isPunchedIn ? (
                         employees.mobatt == '1' ? (
-                            <TouchableOpacity style={{ width: 100, height: 50, borderColor: '#E53935', borderRadius: 75, justifyContent: 'center', alignItems: 'center', alignSelf: 'center', padding: 10 }} onPress={() => setShowPunchCard(true)}>
+                            <TouchableOpacity style={{ width: 100, height: 50, borderColor: '#E53935', borderRadius: 75, justifyContent: 'cenetr', alignItems: 'flex-end', alignSelf: 'center', padding: 10 }} onPress={() => setShowPunchCard(true)}>
                                 <MaterialIcons name="fingerprint" size={30} color="green" />
                                 <Text style={{ fontWeight: 'bold', fontSize: 12, color: 'green' }}>Check In</Text>
                             </TouchableOpacity>
@@ -501,14 +506,33 @@ const HomeScreen = ({ navigation }) => {
                                     const initials = name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase();
                                     const displayDate = `${day} ${new Date(person.dob).toLocaleString('default', { month: 'short' })}`;
 
+                                    const today = new Date();
+                                    const birthdayDate = new Date(today.getFullYear(), parseInt(month) - 1, parseInt(day));
+                                    const isUpcoming = birthdayDate >= new Date(today.setHours(0, 0, 0, 0));
+
                                     return (
                                         <View key={index} style={{ alignItems: 'center', marginRight: 15 }}>
-                                            <View style={styles.birthdayIcon}>
+                                            <View style={[
+                                                styles.birthdayIcon,
+                                                {
+                                                    backgroundColor: isUpcoming ? '#4CAF50' : '#BDBDBD' // Green for upcoming, Grey for past
+                                                }
+                                            ]}>
                                                 <Text style={{ color: '#fff' }}>{initials}</Text>
                                             </View>
                                             <View>
-                                                <Text style={styles.bdayName}>{name}</Text>
-                                                <Text style={styles.bdayDate}>{displayDate}</Text>
+                                                <Text style={[
+                                                    styles.bdayName,
+                                                    { color: isUpcoming ? '#333' : '#888' } // grey text if birthday is past
+                                                ]}>
+                                                    {name}
+                                                </Text>
+                                                <Text style={[
+                                                    styles.bdayDate,
+                                                    { color: isUpcoming ? '#333' : '#aaa' }
+                                                ]}>
+                                                    {displayDate}
+                                                </Text>
                                             </View>
                                         </View>
                                     );
@@ -517,7 +541,7 @@ const HomeScreen = ({ navigation }) => {
                         )}
                     </View>
 
-
+                    {/* Announcements */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Announcements</Text>
                         <ScrollView>
@@ -525,6 +549,7 @@ const HomeScreen = ({ navigation }) => {
                         </ScrollView>
                     </View>
 
+                    {/* Wall Section */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Wall</Text>
                         <Text style={styles.sectionSub}>There are no posts here</Text>
@@ -533,6 +558,7 @@ const HomeScreen = ({ navigation }) => {
                         </TouchableOpacity>
                     </View>
 
+                    {/* holiday Section */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Upcoming holidays</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -639,7 +665,7 @@ const styles = StyleSheet.create({
     disabledText: { color: '#AAAAAA' }, // Disabled text color
 
     section: { backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 15, borderRadius: 8, marginTop: 10, width: '100%' }, // Generic section container
-    sectionTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 20 , borderBottomColor : '#E53935' , borderBottomWidth : 1 }, // Section heading
+    sectionTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 20, borderBottomColor: '#E53935', borderBottomWidth: 1 }, // Section heading
     sectionSub: { fontSize: 12, color: '#777', textAlign: 'center' }, // Section subtext
 
     birthdayRow: { flexDirection: 'column', alignItems: 'flex-start' }, // Birthday list vertical

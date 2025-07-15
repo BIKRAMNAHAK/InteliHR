@@ -10,16 +10,15 @@ import moment from 'moment';
 import { getInfoAsync } from '../services/Actions/employeeAction';
 import ScreenWithBackHandler from '../navigation/ScreenWithBackHandler';
 
-const AttendanceTimelineCard = ({ record }) => {
+const AttendanceCardBody = ({ record }) => {
   const {
     intime, outtime, total_time, att_status, att_type,
-    remark, attdate, latitude, longitude,
+    remark, latitude, longitude,
     chackout_leti, chackout_longi, attfrom
   } = record;
 
   const inTime = intime || '--:--';
   const outTime = outtime || '--:--';
-  const date = attdate ? moment(attdate, ['YYYY-MM-DD', 'DD/MM/YYYY']).format('DD/MM/YYYY') : '__/__/__';
   const inLoc = `${latitude}, ${longitude}`;
   const outLoc = `${chackout_leti}, ${chackout_longi}`;
 
@@ -36,50 +35,47 @@ const AttendanceTimelineCard = ({ record }) => {
   };
 
   return (
-    <View style={styles.cardContainer}>
-      <View style={styles.header}><Text style={styles.headerText}>{date}</Text></View>
-      <View style={styles.card}>
-        <View style={styles.body}>
-          <View style={styles.timeline}>
-            <View style={styles.dot}><MaterialCommunityIcons name="map-marker" size={20} color="green" /></View>
-            <View style={styles.line} />
-            <View style={styles.dot}><MaterialCommunityIcons name="map-marker" size={20} color="red" /></View>
+    <View style={styles.card}>
+      <View style={styles.body}>
+        <View style={styles.timeline}>
+          <View style={styles.dot}><MaterialCommunityIcons name="map-marker" size={20} color="green" /></View>
+          <View style={styles.line} />
+          <View style={styles.dot}><MaterialCommunityIcons name="map-marker" size={20} color="red" /></View>
+        </View>
+
+        <View style={styles.details}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.locText}>Check In: {inLoc}</Text>
+            <MaterialCommunityIcons name={iconMap[attfrom] || 'help-circle'} size={20} color="red" />
           </View>
 
-          <View style={styles.details}>
-            <View style={styles.rowBetween}>
-              <Text style={styles.locText}>Check In: {inLoc}</Text>
-              <MaterialCommunityIcons name={iconMap[attfrom] || 'help-circle'} size={20} color="red" />
-            </View>
-
-            <View style={styles.timeContainer}>
-              <View style={styles.timeLineContainer}>
-                <Text style={styles.totalHoursText}>{total_time || '--:--'}</Text>
-                <View style={styles.timeLineRow}>
-                  <Text style={styles.timeEnd}>{inTime}</Text>
-                  <View style={styles.horizontalLine} />
-                  <Text style={styles.timeEnd}>{outTime}</Text>
-                </View>
-              </View>
-              <View style={styles.statusRow}>
-                <Text>Status: <Text style={{ color: statusColor, fontWeight: '600' }}>{att_status}</Text></Text>
-                <Text>Type: <Text style={{ color: typeColor, fontWeight: '600' }}>{att_type}</Text></Text>
+          <View style={styles.timeContainer}>
+            <View style={styles.timeLineContainer}>
+              <Text style={styles.totalHoursText}>{total_time || '--:--'}</Text>
+              <View style={styles.timeLineRow}>
+                <Text style={styles.timeEnd}>{inTime}</Text>
+                <View style={styles.horizontalLine} />
+                <Text style={styles.timeEnd}>{outTime}</Text>
               </View>
             </View>
-
-            {remark ? (
-              <>
-                <Text>Remark:</Text>
-                <View style={styles.remarkBox}>
-                  <ScrollView nestedScrollEnabled><Text style={styles.remarkText}>{remark}</Text></ScrollView>
-                </View>
-              </>
-            ) : null}
-
-            <View style={styles.rowBetween}>
-              <Text style={styles.locText}>Check Out: {(!chackout_leti || chackout_leti === "null") ? '' : outLoc}</Text>
-              {!outTime ? <MaterialCommunityIcons name={iconMap[attfrom] || 'help-circle'} size={20} color="red" /> : null}
+            <View style={styles.statusRow}>
+              <Text>Status: <Text style={{ color: statusColor, fontWeight: '600' }}>{att_status}</Text></Text>
+              <Text>Type: <Text style={{ color: typeColor, fontWeight: '600' }}>{att_type}</Text></Text>
             </View>
+          </View>
+
+          {remark ? (
+            <>
+              <Text>Remark:</Text>
+              <View style={styles.remarkBox}>
+                <ScrollView nestedScrollEnabled><Text style={styles.remarkText}>{remark}</Text></ScrollView>
+              </View>
+            </>
+          ) : null}
+
+          <View style={styles.rowBetween}>
+            <Text style={styles.locText}>Check Out: {(!chackout_leti || chackout_leti === "null") ? '' : outLoc}</Text>
+            {!outTime ? <MaterialCommunityIcons name={iconMap[attfrom] || 'help-circle'} size={20} color="red" /> : null}
           </View>
         </View>
       </View>
@@ -88,7 +84,7 @@ const AttendanceTimelineCard = ({ record }) => {
 };
 
 export default function Attendance_rec({ route }) {
-  const { empid, date } = route.params || {};
+  const { empid, date, empname } = route.params || {};
   const dispatch = useDispatch();
   const navigation = useNavigation();
 
@@ -111,34 +107,62 @@ export default function Attendance_rec({ route }) {
 
   useFocusEffect(useCallback(() => { fetchAttendanceData(); }, []));
 
+  // Group by date
+  const grouped = attendanceData.reduce((acc, rec) => {
+    const key = rec.attdate;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(rec);
+    return acc;
+  }, {});
+
   return (
     <ScreenWithBackHandler onBack={() => navigation.goBack()}>
       <ScrollView
         style={styles.container}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchAttendanceData} />}
       >
-        {attendanceData.length === 0 ? (
-          <View style={styles.emptyBox}><Text style={styles.emptyText}>📭 Attendance record not found for today</Text></View>
+        {Object.keys(grouped).length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyText}>📭 Attendance record not found for today</Text>
+          </View>
         ) : (
-          attendanceData.map((rec, idx) => <AttendanceTimelineCard key={idx} record={rec} />)
+          Object.entries(grouped).map(([attdate, records], idx) => (
+            <View key={idx} style={styles.cardContainer}>
+              <View style={styles.header}>
+                <Text style={styles.headerText}>{empname}</Text>
+                <Text style={styles.headerText}>
+                  {moment(attdate).format('DD/MM/YYYY')}
+                </Text>
+              </View>
+              {records.map((rec, i) => (
+                <AttendanceCardBody key={i} record={rec} />
+              ))}
+            </View>
+          ))
         )}
       </ScrollView>
     </ScreenWithBackHandler>
   );
 }
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f7f7f7' },
   cardContainer: { paddingHorizontal: 10, marginBottom: 10, marginTop: 10 },
   header: {
     padding: 12,
     backgroundColor: '#E53935',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     borderTopLeftRadius: 15,
     borderTopRightRadius: 15,
+    flexDirection: "row",
+    justifyContent: "space-between"
   },
   headerText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  card: { borderRadius: 8, backgroundColor: '#fff', elevation: 3 },
+  card: {
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    elevation: 3,
+    marginBottom: 10, // ✅ added spacing between cards
+  },
   body: { flexDirection: 'row', padding: 10 },
   timeline: { width: 30, alignItems: 'center' },
   dot: {
