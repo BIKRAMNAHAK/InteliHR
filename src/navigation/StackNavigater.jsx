@@ -16,6 +16,10 @@ import SplashScreen from '../screens/SplashScreen';
 import LoginWithOtp from '../screens/LoginWithOtp';
 import Forget_Password from '../screens/Forget_Password';
 import Attendance_rec from '../screens/Attendance_rec';
+import WallPostForm from '../screens/WallPostForm';
+import PollScreen from '../screens/PollScreen';
+import WallPost from '../screens/WallPost';
+import CameraScreen from '../screens/CameraScreen';
 
 const Stack = createStackNavigator();
 
@@ -42,7 +46,7 @@ const StackNavigater = () => {
             }
             canGoBack={!back}
             navigation={navigation}
-            // onLogout={() => navigation.replace('Login')}
+          // onLogout={() => navigation.replace('Login')}
           />
         ),
         headerStyle: { height: 70 }
@@ -79,21 +83,21 @@ const StackNavigater = () => {
       />
 
       <Stack.Screen
+        name="CameraScreen"
+        component={CameraScreen}
+        options={{ headerShown: false }}
+      />
+
+      <Stack.Screen
         name="Attendance_rec"
         component={Attendance_rec}
         options={{ title: 'Attendance_rec' }}
       />
 
-      {/* <Stack.Screen
-        name="Dashboard"
-        component={Dashboard}
-        options={{ title: 'Dashboard' }}
-      /> */}
-
       <Stack.Screen
         name="Attendance"
         component={AttendanceHistory}
-        options={{  title: ''}}
+        options={{ title: '' }}
       />
 
       <Stack.Screen
@@ -106,6 +110,18 @@ const StackNavigater = () => {
         name="Profile"
         component={ProfileScreen}
         options={{ title: 'Profile' }}
+      />
+
+      <Stack.Screen
+        name="CreatePost"
+        component={WallPostForm}
+        options={{ title: 'Create Post' }}
+      />
+
+      <Stack.Screen
+        name="PullScreen"
+        component={PollScreen}
+        options={{ title: 'Create Poll' }}
       />
     </Stack.Navigator>
   );

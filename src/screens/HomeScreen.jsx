@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     View, Text, TouchableOpacity, SafeAreaView, Image, ScrollView,
     Platform, PermissionsAndroid, StyleSheet, TextInput,
@@ -8,17 +8,17 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import AwesomeAlert from 'react-native-awesome-alerts';
-
 import { useDispatch, useSelector } from 'react-redux';
-import { useIsFocused } from '@react-navigation/native';
-import { launchCamera } from 'react-native-image-picker';
+import { useFocusEffect, useIsFocused, useRoute } from '@react-navigation/native';
+import { Camera, useCameraDevice } from 'react-native-vision-camera';
 import Geolocation from '@react-native-community/geolocation';
 import { attendanceDataAsunc, getInfoAsync } from '../services/Actions/employeeAction';
 import { useLoading } from '../navigation/LoadingContext';
 
-const HomeScreen = ({ navigation }) => {
+const HomeScreen = ({ navigation }) => {    
     const dispatch = useDispatch();
     const isFocused = useIsFocused();
+    const route = useRoute();
     const { loading, setLoading } = useLoading();
     const { attResponse, employee, att_info } = useSelector(state => state.employee);
 
@@ -29,10 +29,10 @@ const HomeScreen = ({ navigation }) => {
     const [location, setLocation] = useState(null);
     const [isPunchedIn, setIsPunchedIn] = useState({
         status: '', active: '', message: '',
-        time: "--:--:--", selfi: '', outtime: "--:--:--", active: ''
+        time: "--:--:--", selfi: '', outtime: "--:--:--"
     });
     const [punchInTime, setPunchInTime] = useState(null);
-    const [punchOutTime, setPunchOutTime] = useState(null);
+    // const [punchOutTime, setPunchOutTime] = useState(null);
     const [totalHours, setTotalHours] = useState('--:--:--');
     const [currentTime, setCurrentTime] = useState('');
     const [birthdays, setBirthdays] = useState([]);
@@ -41,12 +41,36 @@ const HomeScreen = ({ navigation }) => {
     const [alertMessage, setAlertMessage] = useState('');
     const [alertSuccess, setAlertSuccess] = useState(false);
 
+    const cameraRef = useRef(null);
+
+    const requestAllPermissions = async () => {
+        const cameraPermission = await Camera.requestCameraPermission();
+        console.log("Camera Permission:", cameraPermission); // usually "granted" or "denied"
+
+        const micPermission = await Camera.requestMicrophonePermission();
+        console.log("Mic Permission:", micPermission); // usually "granted" or "denied"
+
+        const allGranted =
+            cameraPermission === 'granted' &&
+            micPermission === 'granted';
+
+        console.log("Final Granted Status:", allGranted);
+        return allGranted;
+    };
+
     const showCustomAlert = (title, message, isSuccess = false) => {
         setAlertTitle(title);
         setAlertMessage(message);
         setAlertSuccess(isSuccess);
         setShowAlert(true);
     };
+
+    useEffect(() => {
+        if (route.params?.capturedImage) {
+            setCapturedImage(route.params.capturedImage);
+            setShowPunchCard(true);  // Punch card dikhana
+        }
+    }, [route.params]);
 
     useEffect(() => { if (employee) setEmployees(employee); }, [employee]);
 
@@ -79,65 +103,17 @@ const HomeScreen = ({ navigation }) => {
         setTotalHours(`${diffHrs.toString().padStart(2, '0')}:${diffMin.toString().padStart(2, '0')}:${diffSec.toString().padStart(2, '0')}`);
     };
 
-    const requestCameraPermission = async () => {
-        if (Platform.OS !== 'android') return true;
-        const granted = await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.CAMERA,
-            {
-                title: "Camera Permission",
-                message: "Need camera access to take picture",
-                buttonNeutral: "Ask Me Later",
-                buttonNegative: "Cancel",
-                buttonPositive: "OK"
-            }
-        );
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
-    };
-
-    const collectPunchData = async (isIn) => {
-        const now = new Date();
-        if (isIn) setPunchInTime(now);
-        else setPunchOutTime(now);
-
-        // 1️⃣ Ask for camera permission
-        if (!(await requestCameraPermission())) return null;
-
-        // 2️⃣ Launch camera with reduced quality
-        const resp = await new Promise(resolve =>
-            launchCamera(
-                {
-                    mediaType: 'photo',
-                    cameraType: 'front',
-                    quality: 0.5,  // reduce size without resizer
-                    saveToPhotos: false,
-                    includeBase64: false,
-                },
-                resolve
-            )
-        );
-
-        // 3️⃣ Handle cancel or failure
-        if (resp.didCancel || !resp.assets?.length) return null;
-
-        const image = resp.assets[0];
-
-        // 4️⃣ Directly use original image (no resizing)
-        const imageData = {
-            uri: image.uri,
-            name: image.fileName || 'photo.jpg',
-            type: image.type || 'image/jpeg'
-        };
-
-        setCapturedImage(imageData);
-        setShowPunchCard(true);
-        return { image: imageData, loc: location, now };
-    };
-
-
     const handlePunch = async () => {
-        const isIn = !isPunchedIn.active;
-        const punchData = await collectPunchData(isIn);
-        if (!punchData) return;
+        const granted = await requestAllPermissions();
+        console.log("Permissions granted?", granted);
+
+        if (!granted) {
+            showCustomAlert('Permission Denied', 'Camera access is required.', false);
+            return;
+        }
+
+        // CameraScreen open karo (ko function bhejne ki jagah sirf screen pe jao)
+        navigation.navigate('CameraScreen');
     };
 
     const resetPunchStatus = () => {
@@ -151,10 +127,8 @@ const HomeScreen = ({ navigation }) => {
         });
     };
 
-
     const handleAttandance = async () => {
         setLoading(true);
-        // ✅ Use location from state (fallback)
         let coords = null;
         try {
             coords = await new Promise((resolve, reject) => {
@@ -164,24 +138,23 @@ const HomeScreen = ({ navigation }) => {
                         console.warn('Location Error:', err.message);
                         reject(err);
                     },
-                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+                    { enableHighAccuracy: false, timeout: 15000, maximumAge: 5000 }
                 );
             });
         } catch (error) {
             if (location) {
-                coords = location; // fallback to previously fetched location
+                coords = location;
             } else {
                 setLoading(false);
-                return showCustomAlert('Location Error', 'Unable to fetch location. Please ensure GPS is ON and location permission is granted.', false);
+                return showCustomAlert('Location Error', 'Unable to fetch location.', false);
             }
         }
 
-        // ✅ Check if selfie exists
         if (!capturedImage?.uri) {
             setLoading(false);
             return showCustomAlert('Error', 'Please take a selfie before submitting.', false);
         }
-        // ✅ Prepare time and data
+
         const empid = employees.empid;
         const time = new Date();
         const formattedTime = time.toLocaleTimeString([], {
@@ -189,7 +162,6 @@ const HomeScreen = ({ navigation }) => {
         });
         const formattedDate = time.toLocaleDateString('en-CA');
 
-        // ✅ Prepare form data
         const formData = new FormData();
         formData.append('empid', empid);
         formData.append('attdate', formattedDate);
@@ -198,18 +170,16 @@ const HomeScreen = ({ navigation }) => {
         formData.append('longi', coords.longitude.toString());
         formData.append('remark', remark);
 
-        if (capturedImage && capturedImage.uri) {
+        if (capturedImage?.uri) {
             formData.append('fileName', {
                 uri: capturedImage.uri,
-                name: capturedImage.fileName || 'photo.jpg',
-                type: capturedImage.type || 'image/jpeg',
+                name: capturedImage.name,
+                type: capturedImage.type,
             });
         }
 
-        // ✅ Dispatch
         dispatch(attendanceDataAsunc(formData))
             .then((res) => {
-                setLoading(false);
                 showCustomAlert(
                     res.status === '200' || res.status === '201' ? 'Success' : 'Error',
                     res.message || 'Something went wrong',
@@ -221,6 +191,10 @@ const HomeScreen = ({ navigation }) => {
                 const empid = employees.empid;
                 dispatch(getInfoAsync({ empid, date }))
                     .then((res) => {
+                        setLoading(false);
+                        setShowPunchCard(false);
+                        setCapturedImage(null);
+                        setRemark('');
                         if (res?.status === "200" && res?.Data?.length > 0) {
                             const lastData = res.Data[res.Data.length - 1];
                             setIsPunchedIn({
@@ -237,7 +211,7 @@ const HomeScreen = ({ navigation }) => {
                     }).catch((err) => {
                         setLoading(false);
                         console.error("Error fetching data:", err);
-                        resetPunchStatus(); // 👈 Fallback on error
+                        resetPunchStatus();
                     });
             })
             .catch((err) => {
@@ -245,9 +219,6 @@ const HomeScreen = ({ navigation }) => {
                 showCustomAlert('Error', err.message || 'Something went wrong', false);
             });
 
-        setShowPunchCard(false);
-        setCapturedImage(null);
-        setRemark('');
     };
 
     const handleProfile = () => navigation.navigate('Profile');
@@ -256,116 +227,88 @@ const HomeScreen = ({ navigation }) => {
         const time = new Date();
         const date = time.toLocaleDateString('en-CA')
         const empname = employees.empname
-        const info = {
-            empid,
-            date,
-            empname
-        };
-
-        navigation.navigate('Attendance_rec', {
-            empid: info.empid,
-            date: info.date,
-            empname : info.empname
-        });
+        navigation.navigate('Attendance_rec', { empid, date, empname });
     };
 
     const getCurrentMonthBirthdays = (data) => {
         const today = new Date();
         const currentMonth = today.getMonth() + 1;
-
         return data.filter(emp => {
-            const [year, month, day] = emp.dob.split('-').map(Number);
-            return (
-                month === currentMonth
-            );
+            const [year, month] = emp.dob.split('-').map(Number);
+            return month === currentMonth;
         });
     };
 
-    useEffect(() => {
-        if (!employees.empid) return;
-
-        let watchId = null;
-
-        const fetchData = async () => {
+    useFocusEffect(
+        useCallback(() => {
+            if (!employees.empid) return;
+            let watchId;
+            let isActive = true;
             setLoading(true);
 
-            // 🎯 1. Start Live Location Tracking
-            try {
-                const granted = await PermissionsAndroid.request(
-                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-                    {
-                        title: 'Location Permission',
-                        message: 'App needs access to your location.',
-                        buttonNeutral: 'Ask Me Later',
-                        buttonNegative: 'Cancel',
-                        buttonPositive: 'OK',
-                    }
-                );
-
-                if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-                    watchId = Geolocation.watchPosition(
-                        (position) => {
-                            setLocation(position.coords); // 🔁 updates live
-                            console.log("📍 Live location:", position.coords);
-                        },
-                        (error) => {
-                            console.warn("📡 Location tracking error:", error.message);
-                        },
+            const init = async () => {
+                try {
+                    const granted = await PermissionsAndroid.request(
+                        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
                         {
-                            enableHighAccuracy: true,
-                            distanceFilter: 5, // update after 5 meters movement
-                            interval: 5000,     // Android only
-                            fastestInterval: 2000,
+                            title: 'Location Permission',
+                            message: 'App needs access to your location.',
+                            buttonNeutral: 'Ask Me Later',
+                            buttonNegative: 'Cancel',
+                            buttonPositive: 'OK',
                         }
                     );
+                    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+                        Geolocation.getCurrentPosition(
+                            pos => isActive && setLocation(pos.coords),
+                            err => console.warn("Snapshot error:", err),
+                            { enableHighAccuracy: false, timeout: 10000, maximumAge: 5000 }
+                        );
+                        watchId = Geolocation.watchPosition(
+                            pos => isActive && setLocation(pos.coords),
+                            err => console.warn("Watch error:", err.message),
+                            { enableHighAccuracy: false, distanceFilter: 5, interval: 5000, fastestInterval: 2000 }
+                        );
+                    } else {
+                        console.warn("Location permission denied");
+                    }
+
+                    setLoading(false);
+                    const today = new Date().toLocaleDateString('en-CA');
+                    const res = await dispatch(getInfoAsync({ date: today, empid: employees.empid }));
+                    if (isActive) {
+                        if (res?.status === '200' && res.Data?.length > 0) {
+                            const lastData = res.Data[res.Data.length - 1];
+                            setIsPunchedIn({
+                                status: lastData.att_status || '',
+                                active: lastData.active || '',
+                                message: '',
+                                time: lastData.intime || '--:--:--',
+                                selfi: lastData.selfie || '',
+                                outtime: lastData.outtime || '--:--:--'
+                            });
+                        } else {
+                            setLoading(false);
+                            resetPunchStatus();
+                        }
+                        setBirthdays(getCurrentMonthBirthdays(res.emp || []));
+                    }
+                } catch (err) {
+                    console.error("Error during focus effect:", err);
+                } finally {
+                    setLoading(false);
                 }
-            } catch (error) {
-                console.warn("Permission or Location error:", error);
-            }
+            };
+            init();
 
-            // 🎯 2. Attendance info
-            const today = new Date();
-            const date = today.toLocaleDateString('en-CA');
-            const empid = employees.empid;
-            const getData = { date, empid };
-
-            try {
-                const res = await dispatch(getInfoAsync(getData));
-                setLoading(false);
-
-                if (res?.status === "200" && res?.Data?.length > 0) {
-                    const lastData = res.Data[res.Data.length - 1];
-                    setIsPunchedIn({
-                        status: lastData.att_status || '',
-                        active: lastData.active || '',
-                        message: '',
-                        time: lastData.intime || '--:--:--',
-                        selfi: lastData.selfie || '',
-                        outtime: lastData.outtime || '--:--:--'
-                    });
-                } else {
-                    resetPunchStatus();
+            return () => {
+                isActive = false;
+                if (watchId != null) {
+                    Geolocation.clearWatch(watchId);
                 }
-
-                const birthdayData = getCurrentMonthBirthdays(res.emp || []);
-                setBirthdays(birthdayData);
-            } catch (err) {
-                setLoading(false);
-                console.error("Error fetching data:", err);
-                resetPunchStatus();
-            }
-        };
-
-        fetchData();
-
-        return () => {
-            if (watchId !== null) {
-                Geolocation.clearWatch(watchId);
-                console.log("🛑 Location watch stopped");
-            }
-        };
-    }, [employees, isFocused]);
-
+            };
+        }, [employees.empid, setLoading])
+    );
 
     // ================================
     // Render JSX UI
@@ -373,10 +316,11 @@ const HomeScreen = ({ navigation }) => {
 
     return (
         <SafeAreaView style={styles.container}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', flexWrap: 'wrap', elevation: 16, paddingHorizontal: 10 , rowGap : 10}}>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', flexWrap: 'wrap', elevation: 16, paddingHorizontal: 10, rowGap: 10 }}>
 
                 {/* 👤 Profile & Employee Info */}
-                <View style={{ flexDirection: 'row', alignItems: 'center' , width:'60%'}}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', width: '60%' }}>
                     <TouchableOpacity onPress={handleProfile}>
                         <Image source={{ uri: 'https://images.unsplash.com/photo-1595152772835-219674b2a8a6?crop=faces&fit=crop&w=300&h=300' }} style={{ width: 40, height: 40, borderRadius: 20 }} />
                     </TouchableOpacity>
@@ -387,7 +331,7 @@ const HomeScreen = ({ navigation }) => {
                 </View>
 
                 {/* ⏱ Check In/Out Button */}
-                <View style={{ padding: 16, backgroundColor: '#fff', flexDirection: 'row', width : "40%" }}>
+                <View style={{ padding: 16, backgroundColor: '#fff', flexDirection: 'row', width: "40%" }}>
                     {isPunchedIn.active != 1 && isPunchedIn ? (
                         employees.mobatt == '1' ? (
                             <TouchableOpacity style={{ width: 100, height: 50, borderColor: '#E53935', borderRadius: 75, justifyContent: 'cenetr', alignItems: 'flex-end', alignSelf: 'center', padding: 10 }} onPress={() => setShowPunchCard(true)}>
@@ -453,20 +397,32 @@ const HomeScreen = ({ navigation }) => {
                                         </TouchableOpacity>
                                     </View>
 
-                                    {location && (
+                                    {/* {location && (
                                         <Text style={{ color: '#E53935', fontSize: 14, marginBottom: 5, borderBottomWidth: 1, borderBottomColor: '#ddd', width: '100%', paddingBottom: 8, textAlign: 'center' }}>
                                             Location: {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
                                         </Text>
-                                    )}
+                                    )} */}
+
+                                    <Text style={{ color: '#E53935', fontSize: 14, marginBottom: 5, borderBottomWidth: 1, borderBottomColor: '#ddd', width: '100%', paddingBottom: 8, textAlign: 'center' }}>
+                                        {!location
+                                            ? 'Please wait, trying to fetch location...'
+                                            : `Location: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`}
+                                    </Text>
+
 
                                     <View style={{ flexDirection: 'row', alignItems: 'center', padding: 10, marginTop: 10 }}>
                                         <View style={{ flex: 1, marginRight: 10 }}>
                                             <TextInput style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 10, paddingHorizontal: 15, paddingVertical: 10, fontSize: 16, backgroundColor: '#f9f9f9', color: '#000' }}
                                                 placeholder="Enter Remark" placeholderTextColor="#888" multiline numberOfLines={4} value={remark} onChangeText={(text) => setRemark(text)} />
                                         </View>
-                                        <TouchableOpacity style={{ backgroundColor: '#e53935', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 }} onPress={handleAttandance}>
-                                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Submit</Text>
-                                        </TouchableOpacity>
+                                        {
+                                            location && (
+                                                <TouchableOpacity style={{ backgroundColor: '#e53935', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8 }} onPress={handleAttandance}>
+                                                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Submit</Text>
+                                                </TouchableOpacity>
+                                            )
+                                        }
+
                                     </View>
                                 </View>
                             </ScrollView>
@@ -475,112 +431,113 @@ const HomeScreen = ({ navigation }) => {
                 </KeyboardAvoidingView>
             </TouchableWithoutFeedback>
 
-            {!showPunchCard && (
-                <ScrollView contentContainerStyle={styles.newSections} showsVerticalScrollIndicator={false}>
-                    {/* Top to bottom sections */}
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Off this week</Text>
-                        <ScrollView>
-                            {['Anjali Sharma', 'Rohit Mehra', 'Simran Kaur'].map((name, index) => (
-                                <View key={index} style={styles.rowWithIcon}>
-                                    <Ionicons name="person-outline" size={20} color="#E53935" style={styles.iconLeft} />
-                                    <Text style={styles.bdayName}>{name} (12 Jul - 18 Jul)</Text>
-                                </View>
-                            ))}
-                        </ScrollView>
-                    </View>
-
-                    {/* Wish them section */}
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Wish them</Text>
-
-                        {birthdays.length === 0 ? (
-                            <View style={{ paddingVertical: 10 }}>
-                                <Text style={{ fontSize: 14, color: 'gray' }}>No birthdays this month.</Text>
-                            </View>
-                        ) : (
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                {birthdays.map((person, index) => {
-                                    const name = person.empname;
-                                    const [year, month, day] = person.dob.split("-");
-                                    const initials = name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase();
-                                    const displayDate = `${day} ${new Date(person.dob).toLocaleString('default', { month: 'short' })}`;
-
-                                    const today = new Date();
-                                    const birthdayDate = new Date(today.getFullYear(), parseInt(month) - 1, parseInt(day));
-                                    const isUpcoming = birthdayDate >= new Date(today.setHours(0, 0, 0, 0));
-
-                                    return (
-                                        <View key={index} style={{ alignItems: 'center', marginRight: 15 }}>
-                                            <View style={[
-                                                styles.birthdayIcon,
-                                                {
-                                                    backgroundColor: isUpcoming ? '#4CAF50' : '#BDBDBD' // Green for upcoming, Grey for past
-                                                }
-                                            ]}>
-                                                <Text style={{ color: '#fff' }}>{initials}</Text>
-                                            </View>
-                                            <View>
-                                                <Text style={[
-                                                    styles.bdayName,
-                                                    { color: isUpcoming ? '#333' : '#888' } // grey text if birthday is past
-                                                ]}>
-                                                    {name}
-                                                </Text>
-                                                <Text style={[
-                                                    styles.bdayDate,
-                                                    { color: isUpcoming ? '#333' : '#aaa' }
-                                                ]}>
-                                                    {displayDate}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    );
-                                })}
-                            </ScrollView>
-                        )}
-                    </View>
-
-                    {/* Announcements */}
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Announcements</Text>
-                        <ScrollView>
-                            <Text style={styles.sectionSub}>No announcements for now</Text>
-                        </ScrollView>
-                    </View>
-
-                    {/* Wall Section */}
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Wall</Text>
-                        <Text style={styles.sectionSub}>There are no posts here</Text>
-                        <TouchableOpacity style={styles.postBtn}>
-                            <Text style={styles.postBtnText}>Create first post</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* holiday Section */}
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Upcoming holidays</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                            {[
-                                { title: 'Raksha Bandhan', date: '09 Aug 2025' },
-                                { title: 'Independence Day', date: '15 Aug 2025' },
-                                { title: 'Ganesh Chaturthi', date: '28 Aug 2025' },
-                                { title: 'Diwali', date: '12 Nov 2025' },
-                                { title: 'Christmas', date: '25 Dec 2025' }
-                            ].map((holiday, index) => (
-                                <View key={index} style={styles.holidayCard}>
-                                    <Ionicons name="calendar-outline" size={16} color="#E53935" style={{ marginRight: 5 }} />
-                                    <View>
-                                        <Text style={styles.holidayTitle}>{holiday.title}</Text>
-                                        <Text style={styles.holidayDate}>{holiday.date}</Text>
+            {
+                !showPunchCard && (
+                    <ScrollView contentContainerStyle={styles.newSections} showsVerticalScrollIndicator={false}>
+                        {/* Top to bottom sections */}
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Off this week</Text>
+                            <ScrollView>
+                                {['Anjali Sharma', 'Rohit Mehra', 'Simran Kaur'].map((name, index) => (
+                                    <View key={index} style={styles.rowWithIcon}>
+                                        <Ionicons name="person-outline" size={20} color="#E53935" style={styles.iconLeft} />
+                                        <Text style={styles.bdayName}>{name} (12 Jul - 18 Jul)</Text>
                                     </View>
+                                ))}
+                            </ScrollView>
+                        </View>
+
+                        {/* Wish them section */}
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Wish them</Text>
+
+                            {birthdays.length === 0 ? (
+                                <View style={{ paddingVertical: 10 }}>
+                                    <Text style={{ fontSize: 14, color: 'gray' }}>No birthdays this month.</Text>
                                 </View>
-                            ))}
-                        </ScrollView>
-                    </View>
-                </ScrollView>
-            )
+                            ) : (
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                    {birthdays.map((person, index) => {
+                                        const name = person.empname;
+                                        const [year, month, day] = person.dob.split("-");
+                                        const initials = name.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase();
+                                        const displayDate = `${day} ${new Date(person.dob).toLocaleString('default', { month: 'short' })}`;
+
+                                        const today = new Date();
+                                        const birthdayDate = new Date(today.getFullYear(), parseInt(month) - 1, parseInt(day));
+                                        const isUpcoming = birthdayDate >= new Date(today.setHours(0, 0, 0, 0));
+
+                                        return (
+                                            <View key={index} style={{ alignItems: 'center', marginRight: 15 }}>
+                                                <View style={[
+                                                    styles.birthdayIcon,
+                                                    {
+                                                        backgroundColor: isUpcoming ? '#4CAF50' : '#BDBDBD' // Green for upcoming, Grey for past
+                                                    }
+                                                ]}>
+                                                    <Text style={{ color: '#fff' }}>{initials}</Text>
+                                                </View>
+                                                <View>
+                                                    <Text style={[
+                                                        styles.bdayName,
+                                                        { color: isUpcoming ? '#333' : '#888' } // grey text if birthday is past
+                                                    ]}>
+                                                        {name}
+                                                    </Text>
+                                                    <Text style={[
+                                                        styles.bdayDate,
+                                                        { color: isUpcoming ? '#333' : '#aaa' }
+                                                    ]}>
+                                                        {displayDate}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        );
+                                    })}
+                                </ScrollView>
+                            )}
+                        </View>
+
+                        {/* Announcements */}
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Announcements</Text>
+                            <ScrollView>
+                                <Text style={styles.sectionSub}>No announcements for now</Text>
+                            </ScrollView>
+                        </View>
+
+                        {/* Wall Section */}
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Wall</Text>
+                            <Text style={styles.sectionSub}>There are no posts here</Text>
+                            <TouchableOpacity style={styles.postBtn} onPress={() => navigation.navigate('CreatePost')}>
+                                <Text style={styles.postBtnText}>Create first post</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* holiday Section */}
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Upcoming holidays</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                {[
+                                    { title: 'Raksha Bandhan', date: '09 Aug 2025' },
+                                    { title: 'Independence Day', date: '15 Aug 2025' },
+                                    { title: 'Ganesh Chaturthi', date: '28 Aug 2025' },
+                                    { title: 'Diwali', date: '12 Nov 2025' },
+                                    { title: 'Christmas', date: '25 Dec 2025' }
+                                ].map((holiday, index) => (
+                                    <View key={index} style={styles.holidayCard}>
+                                        <Ionicons name="calendar-outline" size={16} color="#E53935" style={{ marginRight: 5 }} />
+                                        <View>
+                                            <Text style={styles.holidayTitle}>{holiday.title}</Text>
+                                            <Text style={styles.holidayDate}>{holiday.date}</Text>
+                                        </View>
+                                    </View>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    </ScrollView>
+                )
             }
             <AwesomeAlert
                 show={showAlert}
@@ -604,7 +561,7 @@ const HomeScreen = ({ navigation }) => {
                 confirmButtonTextStyle={{ fontSize: 16 }}
             />
 
-        </SafeAreaView>
+        </SafeAreaView >
     );
 };
 export default HomeScreen;
@@ -665,7 +622,7 @@ const styles = StyleSheet.create({
     disabledText: { color: '#AAAAAA' }, // Disabled text color
 
     section: { backgroundColor: '#fff', paddingHorizontal: 10, paddingVertical: 15, borderRadius: 8, marginTop: 10, width: '100%' }, // Generic section container
-    sectionTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 20, borderBottomColor: '#E53935', borderBottomWidth: 1 }, // Section heading
+    sectionTitle: { fontWeight: 'bold', fontSize: 14, marginBottom: 20 }, // Section heading
     sectionSub: { fontSize: 12, color: '#777', textAlign: 'center' }, // Section subtext
 
     birthdayRow: { flexDirection: 'column', alignItems: 'flex-start' }, // Birthday list vertical

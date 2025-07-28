@@ -1,143 +1,147 @@
-import React, { useState } from 'react';
+// WallPost.js
+import React, { useCallback, useState } from 'react';
 import {
-  StyleSheet,
-  View,
-  Image,
-  TextInput,
-  TouchableOpacity,
-  Text,
-  FlatList,
+  StyleSheet, View, Image, TextInput, TouchableOpacity,
+  Text, FlatList, Platform, ActionSheetIOS, Modal,
+  TouchableWithoutFeedback, Alert
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import { useDispatch, useSelector } from 'react-redux';
+import { getLikesAndCommentsAsync, getWallPostsAsync, interactWithPostAsync } from '../services/Actions/employeeAction';
 
-const samplePosts = [
-  {
-    id: '1',
-    name: 'Utkarsha Nagrikar',
-    time: '2 hours ago',
-    text: `Excited to share that our team just launched the new app update! 🚀\nCheck it out and share your feedback.`,
-    image: 'https://images.unsplash.com/photo-1603791440384-56cd371ee9a7?crop=entropy&fit=crop&w=600&h=400',
-    likes: 12,
-  },
-  {
-    id: '2',
-    name: 'Rahul Sharma',
-    time: 'Yesterday',
-    text: `Had an amazing team outing at the lake.\nBonding and fun times with colleagues!`,
-    image: 'https://images.unsplash.com/photo-1505238680356-667803448bb6?crop=entropy&fit=crop&w=600&h=400',
-    likes: 8,
-  },
-  {
-    id: '3',
-    name: 'Priya Verma',
-    time: '3 days ago',
-    text: `Inspirational quote of the day:\n“Strive not to be a success, but rather to be of value.”`,
-    image: 'https://images.unsplash.com/photo-1515378791036-0648a3ef77b2?crop=entropy&fit=crop&w=600&h=400',
-    likes: 25,
-  },
-  {
-    id: '4',
-    name: 'Amit Gupta',
-    time: '1 week ago',
-    text: `Just completed my first marathon!\nFeeling proud and energized. 🏃‍♂️`,
-    image: 'https://wallpapers.com/images/hd/coding-background-9izlympnd0ovmpli.jpg',
-    likes: 40,
-  },
-];
-const filters = ['All posts', 'Organisation', 'HR'];
+// Import separated components
+import PostCard from './like&comments/PostCard';
+import PollCard from './like&comments/PollCard';
+import { useFocusEffect } from '@react-navigation/native';
 
-const WallPost = ({ onAddPress, navigation }) => {
+const WallPost = ({ navigation }) => {
+  const { employee } = useSelector((state) => state.employee);
+  const dispatch = useDispatch();
+
+  const [posts, setPosts] = useState([]);
   const [activeFilter, setActiveFilter] = useState('All posts');
+  const [modalVisible, setModalVisible] = useState(false);
 
-  const handleLike = (post) => {
-    console.log('Liked post', post.id);
+  const filters = ['All posts', 'Organisation', 'HR'];
+  const userId = employee?.empid;
+
+useFocusEffect(
+  useCallback(() => {
+    const fetchPosts = async () => {
+      try {
+        const postsArr = await dispatch(getWallPostsAsync());
+        const extraData = await dispatch(getLikesAndCommentsAsync());
+        console.log("get data", extraData);
+
+        const interactions = extraData.interactions || [];
+
+        // Likes aur Comments ko alag nikalna (type nahi hai to likes aur comment_text check karke)
+        const likes = interactions.filter(i => parseInt(i.likes) > 0);
+        const comments = interactions.filter(i => i.comment_text && i.comment_text.trim() !== '');
+
+        // Merge likes aur comments into posts
+        const postsWithData = postsArr.map(post => ({
+          ...post,
+          likes: likes.filter(like => like.content_id == post.id).length,
+          isLiked: likes.some(like => like.content_id == post.id && like.user_id == userId),
+          comments: comments
+            .filter(comment => comment.content_id == post.id)
+            .map(c => ({
+              id: c.id,
+              user: c.empname || "Anonymous",
+              text: c.comment_text,
+              created_at: c.created_at
+            }))
+        }));
+
+        setPosts(postsWithData);
+      } catch (err) {
+        console.error("Error fetching posts:", err);
+      }
+    };
+
+    fetchPosts();
+
+    return () => {
+      setPosts([]);
+    };
+  }, [dispatch, userId])
+);
+
+
+  // Handle Like API
+  const handleLikeAPI = async (contentId) => {
+    try {
+      const res = await dispatch(interactWithPostAsync(contentId,userId , 'like')); 
+      console.log("Like response", res);
+      return res.status;  
+    } catch (err) {
+      console.error("Like API Error:", err);
+      return 'error';
+    }
   };
 
-  const handleComment = (post) => {
-    console.log('Comment on post', post.id);
+  // Handle Comment API
+  const handleCommentAPI = async (contentId, text) => {
+    try {
+      const res = await dispatch(interactWithPostAsync(contentId, userId, "comment" ,text))
+      // console.log("service response", res);
+      return res;
+    } catch (err) {
+      // console.error("Comment API Error:", err);
+    }
   };
 
-  const handleShare = (post) => {
-    console.log('Share post', post.id);
+  // Render Posts
+  const renderItem = ({ item }) =>
+    item.type === 'poll'
+      ? <PollCard item={item} />
+      : <PostCard item={item} onLike={handleLikeAPI} onComment={handleCommentAPI} />;
+
+  // Handle Add Button
+  const onAddPress = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ['Cancel', 'Poll', 'Create Post'], cancelButtonIndex: 0 },
+        idx => {
+          if (idx === 1) navigation.navigate('PullScreen');
+          if (idx === 2) navigation.navigate('CreatePost');
+        }
+      );
+    } else {
+      setModalVisible(true);
+    }
   };
-
-  const handleCaptionPress = (post) => {
-    console.log('Caption tapped for post', post.id);
-  };
-
-  const renderItem = ({ item }) => (
-    <View style={styles.card}>
-      <View style={styles.header}>
-        <Image source={{ uri: item.image }} style={styles.profileImg} />
-        <View>
-          <Text style={styles.name}>
-            <Text style={{ fontWeight: '600' }}>{item.name}</Text> created a post
-          </Text>
-          <Text style={styles.timestamp}>{item.time}</Text>
-        </View>
-      </View>
-
-      <TouchableOpacity onPress={() => handleCaptionPress(item)}>
-        <Text style={styles.caption}>{item.text}</Text>
-      </TouchableOpacity>
-
-      <Image source={{ uri: item.image }} style={styles.postImage} />
-
-      <TouchableOpacity style={styles.likeRow} onPress={() => handleLike(item)}>
-        <Ionicons name="thumbs-up" size={18} color="#E53935" />
-        <Text style={styles.likeText}>{item.likes}</Text>
-      </TouchableOpacity>
-
-      <View style={styles.actions}>
-        <TouchableOpacity onPress={() => handleLike(item)}>
-          <Text style={styles.actionText}>👍 Like</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => handleComment(item)}>
-          <Text style={styles.actionText}>💬 Comment</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => handleShare(item)}>
-          <Text style={styles.actionText}>🔗 Share</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
 
   return (
     <View style={styles.wrapper}>
+      {/* Header */}
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
           <Image
-            source={{ uri: 'https://images.unsplash.com/photo-1595152772835-219674b2a8a6?crop=faces&fit=crop&w=300&h=300' }}
+            source={{ uri: 'https://images.unsplash.com/photo-1595152772835-219674b2a8a6' }}
             style={styles.profileImage}
           />
         </TouchableOpacity>
-        <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search your colleagues"
-            placeholderTextColor="#888"
-          />
-        </View>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search colleagues"
+          placeholderTextColor="#888"
+        />
       </View>
 
+      {/* Filters */}
       <View style={styles.filterBar}>
         {filters.map(filter => {
           const isActive = activeFilter === filter;
           return (
             <TouchableOpacity
               key={filter}
-              style={[
-                styles.filterButton,
-                isActive ? styles.activeFilter : styles.inactiveFilter,
-              ]}
+              style={[styles.filterButton, isActive ? styles.activeFilter : styles.inactiveFilter]}
               onPress={() => setActiveFilter(filter)}
             >
-              <Text
-                style={[
-                  styles.filterText,
-                  isActive ? styles.activeFilterText : styles.inactiveFilterText,
-                ]}
-              >
+              <Text style={[styles.filterText, isActive ? styles.activeFilterText : styles.inactiveFilterText]}>
                 {filter}
               </Text>
             </TouchableOpacity>
@@ -145,100 +149,91 @@ const WallPost = ({ onAddPress, navigation }) => {
         })}
       </View>
 
-      <FlatList
-        data={samplePosts}
-        keyExtractor={item => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: 70 }}
-        showsVerticalScrollIndicator={false}
-      />
+      {/* Posts List */}
+      {posts.length > 0 ? (
+        <FlatList
+          data={posts}
+          renderItem={renderItem}
+          keyExtractor={item => item.id.toString()}
+          contentContainerStyle={{ paddingBottom: 100 }}
+        />
+      ) : (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No posts available.</Text>
+        </View>
+      )}
 
+      {/* Add Button */}
       <TouchableOpacity style={styles.addButton} onPress={onAddPress}>
         <Ionicons name="add" size={28} color="#fff" />
       </TouchableOpacity>
+
+      {/* Android Modal */}
+      {Platform.OS === 'android' && (
+        <Modal transparent visible={modalVisible} animationType="fade" onRequestClose={() => setModalVisible(false)}>
+          <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalMenu}>
+                <TouchableOpacity
+                  style={styles.menuOption}
+                  onPress={() => { setModalVisible(false); navigation.navigate('PullScreen'); }}
+                >
+                  <Icon name="poll" size={24} color="#E53935" />
+                  <Text style={styles.menuText}>Poll</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuOption}
+                  onPress={() => { setModalVisible(false); navigation.navigate('CreatePost'); }}
+                >
+                  <Icon name="post-add" size={24} color="#E53935" />
+                  <Text style={styles.menuText}>Post</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+      )}
     </View>
   );
 };
 
 export default WallPost;
 
+// Styles
 const styles = StyleSheet.create({
-  wrapper: { flex: 1, backgroundColor: '#fff' },
+  wrapper: { flex: 1, backgroundColor: '#fafafa' },
+
   headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    paddingTop: 20,
-    backgroundColor: '#fff',
-    elevation: 5,
+    flexDirection: 'row', padding: 12, alignItems: 'center',
+    backgroundColor: '#fff', elevation: 4, shadowColor: '#000',
+    shadowOpacity: 0.1, shadowOffset: { width: 0, height: 1 },
   },
   profileImage: { width: 40, height: 40, borderRadius: 20 },
-  searchContainer: { flex: 1, marginLeft: 10 },
   searchInput: {
-    height: 40,
-    backgroundColor: '#eee',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    fontSize: 14,
-    color: '#000',
+    flex: 1, marginLeft: 10, height: 40,
+    backgroundColor: '#f0f0f0', borderRadius: 20,
+    paddingHorizontal: 15, fontSize: 14, color: '#333'
   },
 
-  filterBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  filterButton: {
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    marginRight: 10,
-  },
+  filterBar: { flexDirection: 'row', padding: 10 },
+  filterButton: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 20, marginRight: 8 },
   activeFilter: { backgroundColor: '#E53935' },
   inactiveFilter: { backgroundColor: '#eee' },
   filterText: { fontSize: 14 },
   activeFilterText: { color: '#fff', fontWeight: '600' },
-  inactiveFilterText: { color: '#000' },
+  inactiveFilterText: { color: '#444' },
 
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginHorizontal: 10,
-    marginVertical: 15,
-    elevation: 5,
-  },
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  profileImg: { width: 35, height: 35, borderRadius: 20, marginRight: 10 },
-  name: { color: '#000', fontSize: 14 },
-  timestamp: { color: '#888', fontSize: 12 },
-  caption: { color: '#000', marginVertical: 10, fontSize: 14, lineHeight: 20 },
-  postImage: { width: '100%', height: 260, borderRadius: 10, marginBottom: 10 },
-  likeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  likeText: { color: '#000', marginLeft: 5 },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
-    borderTopWidth: 1,
-    borderTopColor: '#444',
-    paddingTop: 6,
-    marginTop: 6,
-  },
-  actionText: { color: '#000', fontSize: 14 },
   addButton: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
-    backgroundColor: '#E53935',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 5,
+    position: 'absolute', bottom: 20, right: 20, backgroundColor: '#E53935',
+    width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center',
+    elevation: 5, shadowColor: '#000', shadowOpacity: 0.3,
   },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' },
+  modalMenu: { backgroundColor: '#fff', paddingBottom: 20, borderTopLeftRadius: 12, borderTopRightRadius: 12 },
+  menuOption: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderColor: '#eee' },
+  menuText: { fontSize: 16, color: '#000', marginLeft: 12 },
+
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  emptyText: { fontSize: 16, color: '#888', textAlign: 'center' },
 });

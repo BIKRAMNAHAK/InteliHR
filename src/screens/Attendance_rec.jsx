@@ -48,7 +48,20 @@ const AttendanceCardBody = ({ record }) => {
             <Text style={styles.locText}>Check In: {inLoc}</Text>
             <MaterialCommunityIcons name={iconMap[attfrom] || 'help-circle'} size={20} color="red" />
           </View>
-
+          {
+            attfrom === 'Web' && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginTop: 10 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <MaterialCommunityIcons name="account-arrow-right" size={20} color="orange" />
+                  <Text style={{ fontSize: 12, color: 'orange' }}>Apply By</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <MaterialCommunityIcons name="account-check" size={20} color="green" />
+                  <Text style={{ fontSize: 12, color: 'green' }}>Approve By</Text>
+                </View>
+              </View>
+            )
+          }
           <View style={styles.timeContainer}>
             <View style={styles.timeLineContainer}>
               <Text style={styles.totalHoursText}>{total_time || '--:--'}</Text>
@@ -77,6 +90,20 @@ const AttendanceCardBody = ({ record }) => {
             <Text style={styles.locText}>Check Out: {(!chackout_leti || chackout_leti === "null") ? '' : outLoc}</Text>
             {!outTime ? <MaterialCommunityIcons name={iconMap[attfrom] || 'help-circle'} size={20} color="red" /> : null}
           </View>
+           {
+            attfrom === 'Web' && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginTop: 10 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <MaterialCommunityIcons name="account-arrow-right" size={20} color="orange" />
+                  <Text style={{ fontSize: 12, color: 'orange' }}>Apply By</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <MaterialCommunityIcons name="account-check" size={20} color="green" />
+                  <Text style={{ fontSize: 12, color: 'green' }}>Approve By</Text>
+                </View>
+              </View>
+            )
+          }
         </View>
       </View>
     </View>

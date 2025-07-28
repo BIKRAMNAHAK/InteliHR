@@ -9,6 +9,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useDispatch, useSelector } from 'react-redux';
 import { getAttHistoryAsync, getInfoAsync } from '../services/Actions/employeeAction';
 import { useLoading } from '../navigation/LoadingContext';
+import ScreenWithBackHandler from '../navigation/ScreenWithBackHandler';
 
 const { width } = Dimensions.get('window');
 
@@ -25,7 +26,7 @@ const AttendanceHistory = ({ navigation }) => {
   const [attendance, setAttendance] = useState([]);
   const [singleDayAtt, setSingleDayAtt] = useState([])
 
-  
+
   const subAttendance = [
     {
       name: 'John Doe',
@@ -125,48 +126,174 @@ const AttendanceHistory = ({ navigation }) => {
     }
   ];
 
-  useEffect(() => {
-    if (employee) {
-      setLoading(true)
+  // generate month dates 
 
-      dispatch(getAttHistoryAsync(employee.empid))
-        .then((res) => {
-          console.log("return res", res);
-          setLoading(false)
-          const statusColorMap = {
-            present: '#A5D6A7',
-            absent: '#EF9A9A',
-            'miss punch': '#FFE082',
-            leave: '#CE93D8',
-            outside: '#90CAF9',
-            holiday: '#E53935'
+  const formatDateToLocalISO = date => {
+    const offset = date.getTimezoneOffset() * 60000; // offset in ms
+    const localDate = new Date(date.getTime() - offset);
+    return localDate.toISOString().slice(0, 10);     // 'YYYY-MM-DD'
+  };
+
+  const generateMonthDates = (year, month) => {
+    const daysInMonth = new Date(year, month, 0).getDate(); // month is 1-based
+    const dates = [];
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month - 1, day);         // JS Date months are 0-based
+      const formattedDate = formatDateToLocalISO(date);    // corrected local YYYY-MM-DD
+      const dayLabel = date
+        .toLocaleDateString('en-CA', { weekday: 'short' })
+        .toUpperCase();
+
+      // console.log("dates", formattedDate, dayLabel);
+
+      const isSunday = date.getDay() === 0;                // Sunday = 0
+      const status = isSunday ? 'Holiday' : 'Absent';
+
+      dates.push({
+        date: formattedDate,
+        day: dayLabel,
+        punchIn: '',
+        punchOut: '',
+        total: '',
+        color: '#ddd',
+        status
+      });
+    }
+
+    return dates;
+  };
+
+  // Function to get background color based on status
+  function getBgColor(status) {
+    switch (status) {
+      case 'Absent': return '#EF9A9A';
+      case 'Present': return '#9dd49eff';
+      case 'Miss punch': return '#FFE082';
+      case 'Leave': return '#CE93D8';
+      case 'Outside': return '#90CAF9';
+      case 'Holiday': return '#E53935';
+      default: return '#ddd';
+    }
+  }
+
+  // Fetch attendance history on component mount
+  useEffect(() => {
+    if (!employee) return;
+    setLoading(true);
+    dispatch(getAttHistoryAsync(employee.empid))
+      .then((res) => {
+        console.log("res", res);
+
+        setLoading(false);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Midnight for date-only comparison
+
+        const year = today.getFullYear();
+        const month = today.getMonth() + 1;
+        const allDates = generateMonthDates(year, month);
+        const color = '';
+
+        // --- Group raw data by attdate ---
+        const groupedData = res?.Data?.reduce((acc, curr) => {
+          const date = curr.attdate;
+
+          if (!acc[date]) {
+            acc[date] = {
+              ...curr,
+              intime: curr.intime || '',
+              outtime: curr.outtime || ''
+            };
+          } else {
+            // Earliest punch-in
+            if (curr.intime && (!acc[date].intime || curr.intime < acc[date].intime)) {
+              acc[date].intime = curr.intime;
+            }
+            // Latest punch-out
+            if (curr.outtime && (!acc[date].outtime || curr.outtime > acc[date].outtime)) {
+              acc[date].outtime = curr.outtime;
+            }
+          }
+
+          return acc;
+        }, {});
+
+        const groupedArray = Object.values(groupedData);
+
+        const attMap = {};
+        groupedArray.forEach((item) => {
+          const date = item.attdate;
+          const punchIn = item.intime || '';
+          const punchOut = item.outtime || '';
+          const statusRaw = item.att_status || "Absent";
+          const status = statusRaw.charAt(0).toUpperCase() + statusRaw.slice(1).toLowerCase();
+
+          // --- Calculate total hours ---
+          let total = '';
+          if (punchIn && punchOut) {
+            const inTime = new Date(`${date}T${punchIn}`);
+            const outTime = punchOut ? new Date(`${date}T${punchOut}`) : new Date(); // if no outTime, use current time
+
+            const diffMs = outTime - inTime;
+            if (diffMs > 0) {
+              const hours = Math.floor(diffMs / (1000 * 60 * 60));
+              const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+              total = `${hours}h ${minutes}m`;
+            }
+          }
+
+          attMap[date] = {
+            date,
+            day: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
+            punchIn,
+            punchOut,
+            total, // dynamic total time
+            arrival_status: item.arrival_status,
+            lateby: item.late_by,
+            early_by: item.early_by,
+            color,
+            status,
+            isPast: new Date(date) <= today,
+          };
+        });
+
+        const finalAttendance = allDates.map((dateObj) => {
+          const rec = attMap[dateObj.date];
+          if (rec) return rec;
+
+          const recDate = new Date(dateObj.date);
+          const absentRecord = {
+            ...dateObj,
+            day: recDate.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
+            punchIn: '',
+            punchOut: '',
+            total: '',
+            arrival_status: '',
+            lateby: '',
+            early_by: '',
+            isPast: recDate <= today,
           };
 
-          const transformed = res?.Data?.map((item) => {
-            const date = item.attdate;
-            const status = item.att_status?.toLowerCase() || 'absent';
-            const color = statusColorMap[status] || '#EF9A9A';
+          if (absentRecord.isPast && absentRecord.day !== 'SUN') {
+            absentRecord.status = 'Absent';
+          } else if (absentRecord.isPast && absentRecord.day == 'SUN') {
+            absentRecord.status = 'Holiday';
+          } else {
+            absentRecord.status = '';
+          }
 
-            return {
-              date,
-              day: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
-              punchIn: item.intime || '',
-              punchOut: item.outtime || '',
-              total: item.total_time || '',
-              color,
-              status: item.att_status?.charAt(0).toUpperCase() + item.att_status.slice(1)
-            };
-          });
-
-          setAttendance(transformed);
-
-        })
-        .catch((err) => {
-          setLoading(false)
-          console.log("errror ", err);
+          return absentRecord;
         });
-    }
-  }, [employee]);
+
+        setAttendance(finalAttendance);
+      })
+      .catch((err) => {
+        setLoading(false);
+        console.error("Failed to fetch attendance", err);
+      });
+  }, [employee, dispatch]);
+
+  // console.log("att status", attendance);
 
   const pad = s => s.split('-').map((v, i) => i > 0 ? v.padStart(2, '0') : v).join('-');
   const markedDates = {};
@@ -183,7 +310,7 @@ const AttendanceHistory = ({ navigation }) => {
       const d = pad(item.date);
       const dayOfWeek = new Date(item.date).getDay();
       const isHoliday = item.status?.toLowerCase() === 'holiday' || dayOfWeek === 0;
-      const color = isHoliday ? '#E53935' : item.color;
+      const color = isHoliday ? '#E53935' : getBgColor(item.status);
 
       markedDates[d] = {
         customStyles: {
@@ -192,31 +319,41 @@ const AttendanceHistory = ({ navigation }) => {
         }
       };
     });
+
   }
 
   const currentMonth = new Date().toISOString().slice(0, 7);
 
-  const handleDayPress = day => {
-    const selectedDate = day.dateString;
-    const allRecords = attendance.filter(a => pad(a.date) === selectedDate);
+  const handleDayPress = async (day) => {
+    const selectedDate = pad(day.dateString); // normalize date format
 
+    const apiRecords = await handleFetchSingleRecAtt(selectedDate, employee.empid);
+    const allRecords = attendance.filter(a => pad(a.date) === selectedDate);
+    
     // Add activeSub if it's for this date
     if (activeSub && pad(activeSub.date) === selectedDate) {
       allRecords.push(activeSub);
     }
 
-    if (allRecords.length > 0) {
-      setSelectedRecord(allRecords);
-    } else {
-      // If no data
-      setSelectedRecord([{
-        date: selectedDate,
-        punchIn: '00:00',
-        punchOut: '00:00',
-        total: '00:00',
-        status: 'No Data'
-      }]);
-    }
+    // Normalize dates for API too
+    const normalizedApi = apiRecords.map(r => ({
+      ...r,
+      date: r.attdate ? r.attdate : allRecords.find(a => a.date === selectedDate)?.date || selectedDate
+    }));
+    
+    // Combine, but remove duplicates (prefer API data over local)
+    const combined = [
+      ...normalizedApi,
+      ...allRecords.filter(local => !normalizedApi.some(api => api.date === pad(local.date)))
+    ];
+
+    setSelectedRecord(combined.length ? combined : [{
+      date: selectedDate,
+      intime: '00:00',
+      outtime: '00:00',
+      total_time: '00:00',
+      att_status: 'Absent'
+    }]);
   };
 
   const handleLeave = () => {
@@ -227,7 +364,8 @@ const AttendanceHistory = ({ navigation }) => {
     try {
       setLoading(true);
       const response = await dispatch(getInfoAsync({ date, empid }));
-      console.log("Single day data:", response);
+      const records = response?.Data || [];
+      // console.log("Single day data:", response);
       setSingleDayAtt(response.Data || [])
       setLoading(false);
 
@@ -235,16 +373,18 @@ const AttendanceHistory = ({ navigation }) => {
       if (index !== -1) {
         setExpandedSub(index);
       }
+
+      return records;
     } catch (err) {
       setLoading(false);
       console.error("Failed to fetch single record:", err);
     }
   };
 
-  console.log("single rec: ", singleDayAtt);
+  console.log("single rec: ", attendance);
 
   return (
-    <>
+    <ScreenWithBackHandler onBack={() => navigation.goBack()}>
       <View style={styles.headerTitle}>
         <Text style={styles.title}>{activeTab === 'My Attendance' ? 'My Attendance  Rec' : `Sub-Ordinate's Rec`} </Text>
       </View>
@@ -271,7 +411,7 @@ const AttendanceHistory = ({ navigation }) => {
               {[
                 { col: '#EF9A9A', label: 'Absent' },
                 { col: '#A5D6A7', label: 'Present' },
-                { col: '#FFE082', label: 'Miss Punch' },
+                { col: '#FFE082', label: 'Miss punch' },
                 { col: '#CE93D8', label: 'Leave' },
                 { col: '#90CAF9', label: 'Outside' },
                 { col: '#E53935', label: 'Holiday' }
@@ -299,49 +439,70 @@ const AttendanceHistory = ({ navigation }) => {
             />
 
             {selectedRecord && (
-              <View style={styles.detailCard}>
+              <View style={styles.accordionDetail1}>
                 <View style={[styles.cardHeader, { backgroundColor: '#E53935' }]}>
                   <Text style={styles.headerText}>{selectedRecord[0]?.date}</Text>
                   <Ionicons name="close" size={20} style={{ color: "white" }} onPress={() => setSelectedRecord(null)} />
                 </View>
 
-                <ScrollView style={styles.cardBody}>
-                  {selectedRecord.map((rec, index) => (
-                    <View key={index} style={styles.recordContainer}>
-                      <View style={styles.row}>
-                        <Text style={styles.label}>Check In:</Text>
-                        <Text style={styles.value}>{rec.punchIn || '00:00'}</Text>
-                      </View>
-                      <View style={styles.row}>
-                        <Text style={styles.label}>Check Out:</Text>
-                        <Text style={styles.value}>{rec.punchOut || '00:00'}</Text>
-                      </View>
-                      <View style={styles.row}>
-                        <Text style={styles.label}>Total Hour:</Text>
-                        <Text style={styles.value}>{rec.total || '00:00'}</Text>
-                      </View>
-                      <View style={styles.row}>
-                        <Text style={styles.label}>Status:</Text>
-                        <Text style={styles.value}>{rec.status || 'No Data'}</Text>
+                <ScrollView style={{ maxHeight: 250 }} nestedScrollEnabled={true}>
+                  {selectedRecord.map((att, idx) => (
+                    <View key={idx} style={{ elevation: 16, marginBottom: 10, backgroundColor: '#fff', padding: 10 }}>
+
+                      {/* Attendance Details */}
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Check In:</Text>
+                        <Text style={styles.detailValue}>{att.intime || '00:00:00'}</Text>
                       </View>
 
-                      {(index !== selectedRecord.length - 1) && <View style={{ borderBottomWidth: 1, marginVertical: 8, borderColor: '#ccc' }} />}
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Check Out:</Text>
+                        <Text style={styles.detailValue}>{att.outtime || '00:00:00'}</Text>
+                      </View>
+
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Shift:</Text>
+                        <Text style={styles.detailValue}>{att.shift || 'N/A'}</Text>
+                      </View>
+
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Total Hour:</Text>
+                        <Text style={styles.detailValue}>{att.total_time || '00:00 hr'}</Text>
+                      </View>
+
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Remarks:</Text>
+                        <Text style={styles.detailValue}>{att.remark || 'N/A'}</Text>
+                      </View>
+
+                        {/* Footer with Buttons */}
+                  {activeTab === "My Attendance" && (
+                    <View style={styles.cardFooter}>
+                      {
+                        new Date(att.date).getTime() > new Date().setHours(0, 0, 0, 0) && (
+                          <TouchableOpacity
+                            style={[styles.footerBtn, styles.btnLeave]}
+                            onPress={handleLeave}
+                          >
+                            <Text style={styles.btnText}>Apply Leave</Text>
+                          </TouchableOpacity>
+                        )
+                      }
+
+                      {
+                        ((!singleDayAtt[0]?.intime || !singleDayAtt[0]?.outtime) &&
+                          new Date(att.date).getTime() < new Date().setHours(0, 0, 0, 0)) && (
+                          <TouchableOpacity style={[styles.footerBtn, styles.btnReg]}>
+                            <Text style={styles.btnText}>Regularisation</Text>
+                          </TouchableOpacity>
+                        )
+                      }
+
+                    </View>
+                  )}
                     </View>
                   ))}
                 </ScrollView>
-
-                {activeTab === "My Attendance" && (
-                  <View style={styles.cardFooter}>
-                    <TouchableOpacity style={[styles.footerBtn, styles.btnLeave]} onPress={handleLeave}>
-                      <Text style={styles.btnText}>Apply Leave</Text>
-                    </TouchableOpacity>
-                    {selectedRecord.some(r => r.status !== 'No Data') && (
-                      <TouchableOpacity style={[styles.footerBtn, styles.btnReg]}>
-                        <Text style={styles.btnText}>Regularisation</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                )}
               </View>
             )}
 
@@ -349,65 +510,190 @@ const AttendanceHistory = ({ navigation }) => {
         ) : (
           <ScrollView contentContainerStyle={styles.scroll}>
             {activeTab === 'My Attendance' ? (
-              attendance.map((it, i) => (
-                <View key={i}>
-                  <TouchableOpacity
-                    style={styles.subRecordRow}
-                    onPress={() =>
-                      expandedSub === i
-                        ? setExpandedSub(null)
-                        : handleFetchSingleRecAtt(it.date, employee.empid)
-                    }
-                  >
-                    <View style={[styles.dateBox, { backgroundColor: it.color }]}>
-                      <Text style={styles.dateText}>{it.date.slice(-2)}</Text>
-                      <Text style={styles.dayText}>{it.day}</Text>
-                    </View>
-                    <View style={styles.subDetails}>
-                      <Text style={styles.value}>In: {it.punchIn || '00:00'}</Text>
-                      <Text style={styles.value}>Out: {it.punchOut || '00:00'}</Text>
-                      <Text style={styles.value}>Total: {it.total || '00:00'}</Text>
-                    </View>
-                  </TouchableOpacity>
+              attendance.map((it, i) => {
 
-                  {expandedSub === i && (
-                    <ScrollView style={styles.accordionDetail} nestedScrollEnabled={true}>
-                      <View style={styles.AttcardHeader}>
-                        <Text style={styles.detailTitle}>Attendance Details</Text>
-                        <Text style={styles.detailValue}>{it.date}</Text>
+                const isWhiteText =
+                  it.status === 'Leave' ||
+                  it.status === 'Holiday' ||
+                  it.status === 'Absent' ||
+                  it.day === 'SUN' ||
+                  it.punchIn === '';
+
+                return (
+                  <View key={i}>
+                    <TouchableOpacity
+                      style={[styles.subRecordRow, { backgroundColor: '#edf0f0ff' }]}
+                      onPress={() =>
+                        expandedSub === i
+                          ? setExpandedSub(null)
+                          : handleFetchSingleRecAtt(it.date, employee.empid)
+                      }
+                    >
+
+                      <View style={[styles.dateBox, { backgroundColor: getBgColor(it.status) }]}>
+                        <Text style={styles.dateText}>{it.date.slice(-2)}</Text>
+                        <Text style={styles.dayText}>{it.day}</Text>
                       </View>
-                      {singleDayAtt.map((att, idx) => (
-                        <ScrollView showsVerticalScrollIndicator style={{ maxHeight: 100 , backgroundColor : "#fcfcf"}}>
-                          <View key={idx} style={{elevation : 16, marginBottom  : 10}}>
-                            <View style={styles.detailRow}>
-                              <Text style={styles.detailLabel}>Check In:</Text>
-                              <Text style={styles.detailValue}>{att.intime || 'N/A'}</Text>
+
+                      <View style={styles.subDetails}>
+                        {/* Arrival */}
+                        <View style={styles.row}>
+                          <Text style={[styles.label2, isWhiteText && { color: 'black' }]}>
+                            Check In:
+                          </Text>
+                          {(!it.punchIn && !it.punchOut) ? (
+                            <Text style={[styles.value, isWhiteText && { color: 'black' }]}>
+                              00:00:00
+                            </Text>
+                          ) : (
+                            <Text
+                              style={[
+                                styles.value,
+                                { color: it.arrival_status === 'Late' ? 'red' : 'green' },
+                                isWhiteText && { color: 'black' },
+                              ]}
+                            >
+                              {it.punchIn || '00:00:00'}
+
+                            </Text>
+                          )}
+                        </View>
+
+                        {/* Leave */}
+                        <View style={styles.row}>
+                          <Text style={[styles.label2, isWhiteText && { color: 'black' }]}>
+                            Check Out:
+                          </Text>
+                          <Text style={[styles.value, { color: it.checkOut && it.lateby === '0m' ? 'green' : 'red' }, isWhiteText && { color: 'black' },]}>
+                            {it.punchOut || '00:00:00'}
+                          </Text>
+                        </View>
+
+
+                        {/* Status */}
+                        <View style={styles.row}>
+                          <Text style={[styles.label2, isWhiteText && { color: 'black' }]}>
+                            Status:
+                          </Text>
+                          <View style={styles.statusRow}>
+                            <View
+                              style={[
+                                styles.statusCircle,
+                                {
+                                  backgroundColor:
+                                    it.status === 'Absent'
+                                      ? '#EF9A9A'
+                                      : it.status === 'Leave'
+                                        ? '#CE93D8'
+                                        : it.status === 'Holiday'
+                                          ? '#E53935'
+                                          : it.status === 'Outside'
+                                            ? '#90CAF9'
+                                            : it.status === 'Miss punch'
+                                              ? '#fdcb35ff'
+                                              : it.status === 'Present'
+                                                ? 'green'
+                                                : 'gray',
+                                },
+                              ]}
+                            >
+                              <Text style={styles.circleText}>
+                                {it.status ? it.status.charAt(0).toUpperCase() : '-'}
+                              </Text>
                             </View>
-                            <View style={styles.detailRow}>
-                              <Text style={styles.detailLabel}>Check Out:</Text>
-                              <Text style={styles.detailValue}>{att.outtime || 'N/A'}</Text>
-                            </View>
-                            <View style={styles.detailRow}>
-                              <Text style={styles.detailLabel}>Total Hour:</Text>
-                              <Text style={styles.detailValue}>{att.total_time || '00:00 hr'}</Text>
-                            </View>
+                            <Text style={[
+                              styles.value, {
+                                color:
+                                  it.arrival_status === 'Late' ? 'red' :
+                                    it.status === 'Absent' ? '#EF9A9A' :
+                                      it.status === 'Leave' ? '#CE93D8' :
+                                        it.status === 'Holiday' ? '#E53935' :
+                                          it.status === 'Outside' ? '#90CAF9' :
+                                            it.status === 'Miss punch' ? '#FFE082' :
+                                              it.status === 'Present' ? 'green' : 'black'
+                              }
+                            ]}>
+                              {it.lateby && it.arrival_status == 'Late'
+                                ? ` (${it.arrival_status} by ,${it.lateby})`
+                                : ''}
+                            </Text>
                           </View>
-                        </ScrollView>
-                      ))}
-                      <View style={styles.cardFooter}>
-                        <TouchableOpacity style={[styles.footerBtn, styles.btnLeave]} onPress={handleLeave}>
-                          <Text style={styles.btnText}>Apply Leave</Text>
-                        </TouchableOpacity>
-                        {(singleDayAtt.punchIn || singleDayAtt.punchOut) && (
-                          <TouchableOpacity style={[styles.footerBtn, styles.btnReg]}>
-                            <Text style={styles.btnText}>Regularisation</Text>
-                          </TouchableOpacity>
-                        )}
+                        </View>
+
+                        {/* Working Hour */}
+                        <View style={styles.row}>
+                          <Text style={[styles.label2, isWhiteText && { color: 'black' }]}>
+                            Working Hour:
+                          </Text>
+                          <Text style={[styles.value, isWhiteText && { color: 'black' }]}>
+                            {it.total || '00:00:00'}
+                          </Text>
+                        </View>
                       </View>
-                    </ScrollView>
-                  )}
-                </View>
-              ))
+                    </TouchableOpacity>
+
+                    {/* Accordion Detail Below */}
+                    {expandedSub === i && (
+                      <View style={styles.accordionDetail}>
+                        <View style={styles.AttcardHeader}>
+                          <Text style={styles.detailTitle}>Attendance Details</Text>
+                          <Text style={styles.detailValue}>{it.date}</Text>
+                        </View>
+
+                        <ScrollView style={{ maxHeight: 250 }} nestedScrollEnabled={true}>
+                          {singleDayAtt.map((att, idx) => (
+                            <View key={idx} style={{ elevation: 16, marginBottom: 10, backgroundColor: '#fff', padding: 10 }}>
+                              <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Check In:</Text>
+                                <Text style={styles.detailValue}>{att.intime || 'N/A'}</Text>
+                              </View>
+                              <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Check Out:</Text>
+                                <Text style={styles.detailValue}>{att.outtime || '00:00:00'}</Text>
+                              </View>
+                              <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Shift:</Text>
+                                <Text style={styles.detailValue}>{att.shift || 'N/A'}</Text>
+                              </View>
+                              <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Total Hour:</Text>
+                                <Text style={styles.detailValue}>{att.total_time || '00:00 hr'}</Text>
+                              </View>
+                              <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Remarks:</Text>
+                                <Text style={styles.detailValue}>{att.remarks || 'N/A'}</Text>
+                              </View>
+                            </View>
+                          ))}
+                        </ScrollView>
+
+                        <View style={styles.cardFooter}>
+                          {
+                            new Date(it.date).getTime() > new Date().setHours(0, 0, 0, 0) && (
+                              <TouchableOpacity
+                                style={[styles.footerBtn, styles.btnLeave]}
+                                onPress={handleLeave}
+                              >
+                                <Text style={styles.btnText}>Apply Leave</Text>
+                              </TouchableOpacity>
+                            )
+                          }
+
+                          {
+                            ((!singleDayAtt[0]?.intime || !singleDayAtt[0]?.outtime) &&
+                              new Date(it.date).getTime() < new Date().setHours(0, 0, 0, 0)) && (
+                              <TouchableOpacity style={[styles.footerBtn, styles.btnReg]}>
+                                <Text style={styles.btnText}>Regularisation</Text>
+                              </TouchableOpacity>
+                            )
+                          }
+
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                );
+              })
             ) : (
               subAttendance.map((it, i) => (
                 <View key={i}>
@@ -486,7 +772,7 @@ const AttendanceHistory = ({ navigation }) => {
           </TouchableOpacity>
         )}
       </SafeAreaView>
-    </>
+    </ScreenWithBackHandler>
   );
 };
 
@@ -498,6 +784,20 @@ const styles = StyleSheet.create({
   recordContainer: {
     paddingVertical: 8
   },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    // marginBottom: 4,
+    elevation: 16,
+  },
+
+  label2: {
+    fontWeight: '900',
+    fontSize: 12,
+    color: '#333',
+    width: "38%"
+  },
+
   container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 14 },
   header: { fontSize: 20, fontWeight: 'bold', marginBottom: 10 },
   tabContainer: { flexDirection: 'row', marginBottom: 10, gap: 20 },
@@ -510,20 +810,34 @@ const styles = StyleSheet.create({
   legendText: { fontSize: 12, color: '#333' },
   calendar: { borderRadius: 10, marginBottom: 10, elevation: 2 },
   calendarDetailCard: { margin: 10, padding: 12, backgroundColor: '#fff', borderRadius: 8, elevation: 3, shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 1 } },
-  scroll: { paddingBottom: 80 },
+  scroll: { flexGrow: 1, paddingBottom: 80 },
   recordRow: { flexDirection: 'row', padding: 10, marginBottom: 8, backgroundColor: '#f9f9f9', borderRadius: 8, alignItems: 'center' },
   dateBox: { width: 60, height: 60, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   dateText: { fontSize: 14, fontWeight: 'bold' },
   dayText: { fontSize: 10, textAlign: 'center' },
   recordDetails: { flex: 1 },
-  value: { fontSize: 14, fontWeight: '600', color: '#333' },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  statusCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 0,
+  },
+  circleText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  value: { fontSize: 12, fontWeight: '600', color: '#333' },
   subRecordRow: { flexDirection: 'row', alignItems: 'center', padding: 10, marginBottom: 8, backgroundColor: '#f9f9f9', borderRadius: 8 },
   employeePhoto: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#ccc' },
   subDetails: { flex: 1, marginHorizontal: 10 },
   nameText: { fontSize: 14, fontWeight: 'bold', marginBottom: 4 },
   subButtons: { flexDirection: 'row' },
   iconBtn: { marginLeft: 8, padding: 4 },
-  AttcardHeader:{borderBottomWidth : 2 ,borderBottomColor : '#E53935' ,flexDirection : "row" , justifyContent : "space-between" , marginBottom : 20},
+  AttcardHeader: { borderBottomWidth: 2, borderBottomColor: '#E53935', flexDirection: "row", justifyContent: "space-between", marginBottom: 20 },
   accordionDetail: { backgroundColor: '#fff', padding: 16, borderRadius: 10, marginHorizontal: 8, marginBottom: 10, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
   detailTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, paddingBottom: 4 },
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
@@ -531,10 +845,10 @@ const styles = StyleSheet.create({
   detailValue: { fontSize: 14, color: '#222', fontWeight: '600' },
   toggleFloating: { position: 'absolute', bottom: 70, right: 20, flexDirection: 'row', backgroundColor: '#E53935', padding: 8, borderRadius: 20, elevation: 4 },
   toggleText: { color: '#fff', marginLeft: 5 },
-  detailCard: { width: '100%', borderRadius: 8, overflow: 'hidden', marginVertical: 10, elevation: 5, backgroundColor: '#fff' },
-  cardHeader: { padding: 10, flexDirection: "row", justifyContent: "space-between" },
+  accordionDetail1: { backgroundColor: '#fff', padding: 0, borderRadius: 10, marginHorizontal: 8, marginBottom: 10, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+  cardHeader: { paddingVertical: 10, flexDirection: "row", justifyContent: "space-between", width: '100%', alignItems: 'center', backgroundColor: '#E53935', borderTopLeftRadius: 8, borderTopRightRadius: 8 },
   headerText: { fontSize: 16, fontWeight: 'bold', color: '#fff' },
-  cardBody: { paddingHorizontal: 20, paddingVertical: 20, backgroundColor: '#fff', flexDirection: 'column', gap: 8 },
+  cardBody: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#fff', flexDirection: 'column', gap: 8, maxHeight: 250 },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   label: { fontSize: 14, color: '#555' },
   cardFooter: { flexDirection: 'column', gap: 5, padding: 10, backgroundColor: '#f9f9f9' },
